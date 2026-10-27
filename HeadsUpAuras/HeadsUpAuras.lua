@@ -1951,6 +1951,9 @@ function HeadsUpAuras_UpdateCounter(ind)
     numFs:SetText(number)
     nameFs:SetText("")
     CT.icon:Hide()
+    local contentShown = shape ~= "bar" or (cfg.height or 24) >= 12
+    numFs:SetShown(contentShown)
+    nameFs:SetShown(contentShown)
     if shape ~= "bar" then
         -- text and icon: only the number, in the middle
         numFs:ClearAllPoints()
@@ -1962,7 +1965,7 @@ function HeadsUpAuras_UpdateCounter(ind)
         local W, height = cfg.width or 200, cfg.height or 24
         local padLeft, padRight = 2, 2
         local iconAt = (cfg.ctIcon == "right") and "right" or ((cfg.ctIcon ~= "off") and "left" or nil)
-        if iconAt and id then
+        if height >= 16 and iconAt and id then
             local _, picture = HeadsUpAuras_SubjectFacts(cfg)
             if picture then
                 local px = math.max(8, height - 1)
@@ -2104,7 +2107,9 @@ function HeadsUpAuras_ApplyResource(ind, width, height)
     -- the text
     local size = math.max(8, math.min(64, math.floor(cfg.ctSize or 12)))
     local tc = cfg.ctColor or { 1, 1, 1 }
+    if shape == "bar" then size = math.min(size, math.max(8, height - 4)) end
     RS.text:SetFont(STANDARD_TEXT_FONT, size, "OUTLINE")
+    RS.text:SetShown(shape ~= "bar" or height >= 12)
     RS.text:SetTextColor(tc[1], tc[2], tc[3], 1)
     RS.text:ClearAllPoints()
     local at = (shape == "bar") and (cfg.resTextPos or "center") or "center"
@@ -2131,6 +2136,7 @@ function HeadsUpAuras_ApplyResource(ind, width, height)
     end
     local vertical = (dir == "up" or dir == "down")
     local gap = 3
+    if framedBar and vertical then gap = math.min(gap, height / (2 * points)) end
     -- the lines that cut the bar in parts
     RS.seps = RS.seps or {}
     for _, sep in ipairs(RS.seps) do sep:Hide() end
@@ -2192,7 +2198,7 @@ function HeadsUpAuras_ApplyResource(ind, width, height)
             local square = (pstyle == "framed")
             local d = math.max(4, math.min(cellW, cellH))
             local w, h = d, d
-            if square then w, h = math.max(4, cellW), math.max(4, cellH) end
+            if square then w, h = math.max(1, cellW), math.max(0.01, math.min(height, cellH)) end
             pf:ClearAllPoints()
             pf:SetSize(w, h)
             if vertical then
@@ -2227,7 +2233,7 @@ function HeadsUpAuras_ApplyResource(ind, width, height)
                 pf.cd:SetSwipeColor(color[1], color[2], color[3], 1)
                 pf.cd:Show()
                 -- the filling inside (it lights up when the point is there)
-                local inset = math.max(2, math.floor(math.min(w, h) * 0.24))
+                local inset = math.min(math.max(2, math.floor(math.min(w, h) * 0.24)), math.min(w, h) / 4)
                 pf.fill:SetPoint("TOPLEFT", pf, "TOPLEFT", inset, -inset)
                 pf.fill:SetPoint("BOTTOMRIGHT", pf, "BOTTOMRIGHT", -inset, inset)
                 if pstyle == "ring" then
@@ -2430,7 +2436,9 @@ local function ApplyBar(ind, cfg, width, height)
         return
     end
     bar:Show()
-    local side = (cfg.barIconOn ~= false) and cfg.barIcon or "none"
+    local contentShown = height >= 16
+    bar.time:SetShown(height >= 12)
+    local side = (contentShown and cfg.barIconOn ~= false) and cfg.barIcon or "none"
     if side ~= "left" and side ~= "right" then side = "none" end
     local iconW = (side == "none") and 0 or height
     local gap = (side == "none") and 0 or 2
@@ -2443,7 +2451,7 @@ local function ApplyBar(ind, cfg, width, height)
     local color = cfg.barColor or { 1, 0.56, 0.12 }
     bar.fill:SetColorTexture(color[1], color[2], color[3], 1)
     -- the seconds: at the left end, in the middle or at the right end of the bar
-    bar.time:SetFont(STANDARD_TEXT_FONT, math.max(9, math.min(16, height - 8)), "OUTLINE")
+    bar.time:SetFont(STANDARD_TEXT_FONT, math.max(8, math.min(16, height - 4)), "OUTLINE")
     bar.time:ClearAllPoints()
     local timeAt = cfg.barTime or "right"
     if timeAt == "left" then
@@ -2568,6 +2576,7 @@ local function ApplyConfig(ind)
     ind.CT:SetShown(isCounter)
     if isCounter then
         local size = math.max(8, math.min(64, math.floor(cfg.ctSize or 12)))
+        if counterShape == "bar" then size = math.min(size, math.max(8, height - 4)) end
         ind.ctSize = size
         ind.counterShape = counterShape
         local color = cfg.ctColor or { 1, 1, 1 }

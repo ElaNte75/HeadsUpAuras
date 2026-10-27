@@ -1504,8 +1504,10 @@ local function BuildAuraPage(page, tracker, part, counter, resource)
                 type = "input", numeric = true, maxLetters = 3, unit = unit, w = BOX_W, gap = gap,
                 get = function(d) return d[key] end,
                 set = function(d, v)
-                    v = UI.Clamp(v, 16, 256)
+                    local minimum = (key == "height" and d.shape == "bar") and 1 or 16
+                    v = UI.Clamp(v, minimum, 256)
                     d[key] = v
+                    if v < 16 then d.sizeLinked = false end
                     if d.sizeLinked then d[other] = v end
                 end,
             }
