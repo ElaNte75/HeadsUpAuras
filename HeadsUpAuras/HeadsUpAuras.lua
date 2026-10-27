@@ -41,7 +41,7 @@ local EFFECT_STRATA = { "LOW", "MEDIUM", "HIGH", "DIALOG", "FULLSCREEN" }
 -- How small the icon gets during "Pulse" (1 = not at all).
 local PULSE_SHRINK = 0.92
 
-local KEYS = { "class", "specs", "name", "hidden", "spellID", "healthEnabled", "healthOp", "healthPct", "enemyEnabled", "enemyOp", "enemyPct", "cdEnabled", "cdState", "chargesEnabled", "chargesState", "enemyAliveEnabled", "enemyAlive", "buffEnabled", "buffID", "buffState", "suppressEnabled", "suppressSeconds", "suppressReset", "uid", "trackerOf", "trackerCue", "kind", "trackShow", "barDrain", "barIcon", "barColor", "barTime", "barTimeOn", "barIconOn", "otherAuras", "crowdEnabled", "crowdOp", "crowdN", "crowdMetric", "group", "effect", "icon", "showWhenEnabled", "showRules", "lingerEnabled", "lingerSeconds", "layer", "availEnabled", "pos", "width", "height", "sizeLinked", "powerEnabled", "powerOp", "powerValue", "secEnabled", "secOp", "secValue", "buffAlways", "empowerFx", "soundEnabled", "soundKey", "soundVolume", "formEnabled", "formSpell", "tgtHostileEnabled", "tgtHostile", "tgtTypeEnabled", "tgtType", "tgtClassEnabled", "tgtClass", "threatEnabled", "threatState", "shape", "empowerLight", "itemID", "ctIcon", "ctName", "ctNum", "ctColor", "ctSize", "ctBg", "ctBgAlpha", "ctWho", "ctChar", "ctType", "currencyID", "ctBank", "buffIgnore" }
+local KEYS = { "class", "specs", "name", "hidden", "spellID", "healthEnabled", "healthOp", "healthPct", "enemyEnabled", "enemyOp", "enemyPct", "cdEnabled", "cdState", "chargesEnabled", "chargesState", "enemyAliveEnabled", "enemyAlive", "buffEnabled", "buffID", "buffState", "suppressEnabled", "suppressSeconds", "suppressReset", "uid", "trackerOf", "trackerCue", "kind", "trackShow", "barDrain", "barIcon", "barColor", "barTime", "barTimeOn", "barIconOn", "otherAuras", "crowdEnabled", "crowdOp", "crowdN", "crowdMetric", "group", "effect", "icon", "showWhenEnabled", "showRules", "lingerEnabled", "lingerSeconds", "layer", "availEnabled", "pos", "width", "height", "sizeLinked", "powerEnabled", "powerOp", "powerValue", "secEnabled", "secOp", "secValue", "buffAlways", "empowerFx", "soundEnabled", "soundKey", "soundVolume", "formEnabled", "formSpell", "tgtHostileEnabled", "tgtHostile", "tgtTypeEnabled", "tgtType", "tgtClassEnabled", "tgtClass", "threatEnabled", "threatState", "shape", "empowerLight", "itemID", "ctIcon", "ctName", "ctNum", "ctColor", "ctSize", "ctBg", "ctBgAlpha", "ctWho", "ctChar", "ctType", "currencyID", "ctBank", "buffIgnore", "resWhat", "resShow", "resTextPos", "resColor", "resDir", "resStyle" }
 
 local auras = {}        -- saved list (HeadsUpAurasDB.auras)
 local pool = {}         -- pool[i] = indicator for auras[i]
@@ -183,6 +183,15 @@ local function NewConfig()
         ctWho = "spec",          -- who sees a counter: "all" (every character), "char" (only the one that made it), "spec" (its class
                                  -- and specializations, as an ability) or "prof" (the characters with the profession of the item)
         ctChar = nil,            -- the character that made it ("Name-Realm"), for "char"
+        -- a Resource (kind "resource"): a bar, a text or pips that show your health, your main resource or your second resource.
+        -- The look uses the same keys as a counter (shape, ctSize, ctColor, ctBg, ctBgAlpha, ctWho); spellID is 0, like a counter.
+        resWhat = "health",      -- what it shows: "health", "power" (the main resource: runic power, mana...) or "second" (runes, holy power...)
+        resShow = "percent",     -- the value written on it: "none", "number" or "percent"
+        resTextPos = "center",   -- where it is written on a bar: "left", "center" or "right"
+        resColor = nil,          -- the colour of the bar (nil = the colour of the resource)
+        resDir = "right",        -- the bar fills toward "right", "left", "up" or "down"
+        resStyle = "flat",       -- the look of the points of the second resource: circles "flat" / "ring" / "game" (the runes of the game),
+                                 -- or (on a bar) "segmented" / "framed" (separate squares that fill as a rune recharges)
         ctBgAlpha = 20,          -- ... and how solid it is, in percent (0 = no box at all, 100 = solid): 20
         layer = 3,        -- display priority 1..5 (3 = normal); higher is drawn on top
         pos = nil,        -- { point, relPoint, x, y }
@@ -208,6 +217,8 @@ local function CopyConfig(src)
         elseif k == "buffIgnore" and src.buffIgnore then
             copy.buffIgnore = {}
             for key, on in pairs(src.buffIgnore) do copy.buffIgnore[key] = on end
+        elseif k == "resColor" and src.resColor then
+            copy.resColor = { src.resColor[1], src.resColor[2], src.resColor[3] }
         elseif k == "ctColor" and src.ctColor then
             copy.ctColor = { src.ctColor[1], src.ctColor[2], src.ctColor[3] }
         elseif k == "ctBg" and src.ctBg then
@@ -1078,7 +1089,7 @@ local function CreateIndicator()
     ind.bar = BAR
     BAR:SetScript("OnUpdate", function(self)
         local cfg = ind.cfg
-        if not cfg or cfg.shape ~= "bar" or cfg.kind == "counter" then return end
+        if not cfg or cfg.shape ~= "bar" or cfg.kind == "counter" or cfg.kind == "resource" then return end
         local total = math.max(cfg.suppressSeconds or 10, 1)
         local fraction
         if ind.editing or ind.preview or ind.dragging then
@@ -1130,6 +1141,29 @@ local function CreateIndicator()
     end
     ind.CT = CT
 
+    -- RESOURCE: a status bar (health, main resource, second resource), a text, and pips (small squares or circles, one for
+    -- each point of the second resource). Part of B like the icon. HeadsUpAuras_UpdateResource fills it.
+    local RS = CreateFrame("Frame", nil, B)
+    RS:SetAllPoints(B)
+    RS:Hide()
+    RS.panel = RS:CreateTexture(nil, "BACKGROUND")
+    RS.panel:SetAllPoints()
+    RS.panel:SetColorTexture(0, 0, 0, 0.2)
+    RS.bar = CreateFrame("StatusBar", nil, RS)
+    RS.bar:SetAllPoints(RS)
+    RS.bar:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
+    RS.bar:SetMinMaxValues(0, 1)
+    RS.bar:SetValue(0)
+    RS.bar:Hide()
+    RS.textFrame = CreateFrame("Frame", nil, RS)   -- the text is above the bar
+    RS.textFrame:SetAllPoints(RS)
+    RS.textFrame:SetFrameLevel(RS.bar:GetFrameLevel() + 3)
+    RS.text = RS.textFrame:CreateFontString(nil, "OVERLAY")
+    RS.text:SetFont(STANDARD_TEXT_FONT, 12, "OUTLINE")
+    RS.text:SetWordWrap(false)
+    RS.pips = {}
+    ind.RS = RS
+
     local hint = B:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     hint:SetPoint("TOP", B, "BOTTOM", 0, -2)
     hint:SetJustifyH("CENTER")
@@ -1142,7 +1176,7 @@ local function CreateIndicator()
     ind.M, ind.P, ind.S = M, P, S
     ind.parts = { A, C, E, F, G, H, J, M, P, S, K1, K2, K3, B, I, cd, R, ind.faces[2].B, ind.faces[2].I, ind.faces[2].cd,
         ind.faces[1].fx, ind.faces[2].fx, ind.faces[1].fx.top, ind.faces[2].fx.top,
-        ind.faces[1].RIM, ind.faces[2].RIM, BAR, BAR.track, CT }   -- every frame of the indicator (for the layer setting)
+        ind.faces[1].RIM, ind.faces[2].RIM, BAR, BAR.track, CT, RS, RS.bar, RS.textFrame }   -- every frame of the indicator (for the layer setting)
 
     A:SetScript("OnDragStart", function(self)
         if not (ind.editing or ind.preview) then return end
@@ -1223,7 +1257,7 @@ end
 
 local function UpdateCooldown(ind)
     local cfg = ind.cfg
-    if not cfg or not cfg.spellID or cfg.kind == "counter" then return end
+    if not cfg or not cfg.spellID or cfg.kind == "counter" or cfg.kind == "resource" then return end
     local duration = C_Spell.GetSpellCooldownDuration(cfg.spellID)
     if duration then
         for _, face in ipairs(ind.faces) do
@@ -1387,9 +1421,14 @@ local function ReadableConditionsMet(cfg, lingering, skipTarget)
         if kind ~= (cfg.tgtHostile or "enemy") then return false end
     end
     if cfg.tgtTypeEnabled then
-        local ok, isPlayer = pcall(UnitIsPlayer, "target")
-        if not ok or issecretvalue(isPlayer) then return false end
-        if (isPlayer and true or false) ~= (cfg.tgtType == "player") then return false end
+        if cfg.tgtType == "attackable" then
+            local ok, attackable = pcall(UnitCanAttack, "player", "target")
+            if not ok or issecretvalue(attackable) or not attackable then return false end
+        else
+            local ok, isPlayer = pcall(UnitIsPlayer, "target")
+            if not ok or issecretvalue(isPlayer) then return false end
+            if (isPlayer and true or false) ~= (cfg.tgtType == "player") then return false end
+        end
     end
     if cfg.enemyAliveEnabled then
         local ok, dead = pcall(UnitIsDead, "target")
@@ -1683,7 +1722,7 @@ local function UpdateVisual(ind)
     local M, P, S = ind.M, ind.P, ind.S
     local placingNow = ind.editing or ind.preview
     local notForMe
-    if cfg and cfg.kind == "counter" then
+    if cfg and (cfg.kind == "counter" or cfg.kind == "resource") then
         notForMe = not HeadsUpAuras_CounterAllowed(cfg, placingNow)   -- (a counter may be for every character, or by profession)
     else
         notForMe = cfg and (cfg.class ~= playerClass or (cfg.specs and not cfg.specs[currentSpec] and not placingNow))
@@ -1698,6 +1737,7 @@ local function UpdateVisual(ind)
     A:Show()
     ind.R:Show()
     if cfg.kind == "counter" then HeadsUpAuras_UpdateCounter(ind) end
+    if cfg.kind == "resource" then HeadsUpAuras_UpdateResource(ind) end
     local placing = ind.editing or ind.preview or ind.dragging
     ind.hint:SetShown(placing)
     if placing then
@@ -2017,10 +2057,375 @@ function HeadsUpAuras_UpdateCounter(ind)
     CT.bg:SetShown(shape == "text" and not ind.CT.hasBg and (ind.editing or ind.preview or ind.dragging) and true or false)
 end
 
+-- The colour of the bar of a resource that has not been chosen: the colour of the resource (the game's own colours for powers).
+local function ResourceAutoColor(what, ind)
+    if what == "health" then return { 0.25, 0.8, 0.3 } end
+    local resources = GetResources()
+    local t = (what == "power") and (resources.primary and resources.primary.type) or (resources.secondary and resources.secondary.type)
+    if what == "second" and t == 5 then   -- runes: the game has no colour for them, so they take the one of the specialization
+        return ({ [250] = { 0.85, 0.1, 0.1 }, [251] = { 0.3, 0.65, 1 }, [252] = { 0.45, 0.85, 0.2 } })[currentSpec] or { 0.3, 0.65, 1 }
+    end
+    local c = t and PowerBarColor and (PowerBarColor[t] or PowerBarColor[(t == 0) and "MANA" or 0])
+    if c and c.r then return { c.r, c.g, c.b } end
+    return (what == "power") and { 0.2, 0.5, 1 } or { 1, 0.82, 0.2 }
+end
+
+-- the colour a resource has when none was chosen (for the colour box of the settings window)
+function HeadsUpAuras_ResourceAutoColor(what)
+    return ResourceAutoColor(what, {})
+end
+
+-- the look of a resource (called when the settings change): its box, bar, text and pips
+function HeadsUpAuras_ApplyResource(ind, width, height)
+    local cfg, RS = ind.cfg, ind.RS
+    local what = cfg.resWhat or "health"
+    local shape = "bar"
+    if cfg.shape == "circles" and what == "second" then
+        shape = "pips"   -- (only the second resource is counted in circles)
+    end
+    -- the style of the points: a bar can be cut in parts (segmented) or be separate framed squares, circles can be flat, rings or the runes of the game
+    local style = cfg.resStyle or "flat"
+    local framedBar = (shape == "bar" and what == "second" and style == "framed")
+    if framedBar then shape = "pips" end
+    local pipStyle = framedBar and "framed" or ((style == "ring" or style == "game") and style or "flat")
+    if shape == "pips" and not framedBar and pipStyle == "game" then
+        -- the runes of the game: only if the game has their pictures and the resource is runes
+        local res = GetResources()
+        local okAtlas = C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo("UF-DKRunes-BGDis")
+        if not (res.secondary and res.secondary.type == 5 and okAtlas) then pipStyle = "flat" end
+    end
+    ind.resShape = shape
+    ind.pipStyle = pipStyle
+    -- the box behind it
+    local bg = cfg.ctBg or { 0, 0, 0 }
+    local bgAlpha = (cfg.ctBgAlpha or 20) / 100
+    RS.panel:SetColorTexture(bg[1], bg[2], bg[3], bgAlpha)
+    RS.panel:SetShown(bgAlpha > 0)
+    -- the text
+    local size = math.max(8, math.min(64, math.floor(cfg.ctSize or 12)))
+    local tc = cfg.ctColor or { 1, 1, 1 }
+    RS.text:SetFont(STANDARD_TEXT_FONT, size, "OUTLINE")
+    RS.text:SetTextColor(tc[1], tc[2], tc[3], 1)
+    RS.text:ClearAllPoints()
+    local at = (shape == "bar") and (cfg.resTextPos or "center") or "center"
+    if at == "left" then
+        RS.text:SetPoint("LEFT", RS, "LEFT", 4, 0)
+    elseif at == "right" then
+        RS.text:SetPoint("RIGHT", RS, "RIGHT", -4, 0)
+    else
+        RS.text:SetPoint("CENTER", RS, "CENTER", 0, 0)
+    end
+    -- the bar
+    local color = cfg.resColor or ResourceAutoColor(what, ind)
+    ind.resColor = color
+    RS.bar:SetShown(shape == "bar")
+    RS.bar:SetStatusBarColor(color[1], color[2], color[3], 1)
+    local dir = cfg.resDir or "right"
+    RS.bar:SetOrientation((dir == "up" or dir == "down") and "VERTICAL" or "HORIZONTAL")
+    RS.bar:SetReverseFill((dir == "left" or dir == "down") and true or false)
+    -- the second resource has points (runes, holy power...): a bar is cut in one part for each point, and circles show one each
+    local points = 0
+    if what == "second" then
+        local resources = GetResources()
+        points = math.max(1, math.min(12, resources.secondary and resources.secondary.max or 5))
+    end
+    local vertical = (dir == "up" or dir == "down")
+    local gap = 3
+    -- the lines that cut the bar in parts
+    RS.seps = RS.seps or {}
+    for _, sep in ipairs(RS.seps) do sep:Hide() end
+    if shape == "bar" and points > 1 then
+        for k = 1, points - 1 do
+            local sep = RS.seps[k]
+            if not sep then
+                sep = RS.textFrame:CreateTexture(nil, "ARTWORK")
+                RS.seps[k] = sep
+            end
+            sep:SetColorTexture(0, 0, 0, 0.85)
+            sep:ClearAllPoints()
+            if vertical then
+                sep:SetSize(width, 2)
+                sep:SetPoint("BOTTOMLEFT", RS, "BOTTOMLEFT", 0, k * height / points - 1)
+            else
+                sep:SetSize(2, height)
+                sep:SetPoint("BOTTOMLEFT", RS, "BOTTOMLEFT", k * width / points - 1, 0)
+            end
+            sep:Show()
+        end
+    end
+    -- the points: they fill the box, with the same gap between them, starting from the side the bar fills toward. A point is a small
+    -- frame with the parts of every style (the unused ones stay hidden)
+    for _, pf in ipairs(RS.pips) do pf:Hide() end
+    ind.pipCount = 0
+    if shape == "pips" then
+        local n = points
+        ind.pipCount = n
+        local pstyle = ind.pipStyle
+        local cellW = vertical and width or (width - gap * (n - 1)) / n
+        local cellH = vertical and (height - gap * (n - 1)) / n or height
+        local specName = ({ [250] = "Blood", [251] = "Frost", [252] = "Unholy" })[currentSpec] or "Blood"
+        ind.runeSpec = specName
+        for i = 1, n do
+            local pf = RS.pips[i]
+            if not pf then
+                pf = CreateFrame("Frame", nil, RS)
+                pf.fill = pf:CreateTexture(nil, "ARTWORK")
+                pf.mask = pf:CreateMaskTexture()
+                pf.mask:SetTexture(FX_MASK, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+                pf.line = pf:CreateTexture(nil, "BORDER")
+                pf.cd = CreateFrame("Cooldown", nil, pf, "CooldownFrameTemplate")
+                pf.cd:ClearAllPoints()
+                pf.cd:SetAllPoints(pf)
+                pf.cd:SetHideCountdownNumbers(true)
+                pf.cd:SetDrawEdge(false)
+                pf.cd:SetDrawBling(false)
+                pf.cd:SetReverse(true)   -- (it fills as the time goes, instead of emptying)
+                pf.gbg = pf:CreateTexture(nil, "BACKGROUND")
+                pf.top = CreateFrame("Frame", nil, pf)   -- (above the cooldown: the skull must not be covered by the swipe)
+                pf.top:SetAllPoints(pf)
+                pf.top:SetFrameLevel(pf.cd:GetFrameLevel() + 2)
+                pf.gskull = pf.top:CreateTexture(nil, "ARTWORK")
+                pf.geyes = pf.top:CreateTexture(nil, "OVERLAY")
+                RS.pips[i] = pf
+            end
+            local pos = (dir == "left" or dir == "down") and (n - i + 1) or i   -- (the first one is at the side it fills from)
+            local square = (pstyle == "framed")
+            local d = math.max(4, math.min(cellW, cellH))
+            local w, h = d, d
+            if square then w, h = math.max(4, cellW), math.max(4, cellH) end
+            pf:ClearAllPoints()
+            pf:SetSize(w, h)
+            if vertical then
+                pf:SetPoint("BOTTOMLEFT", RS, "BOTTOMLEFT", (cellW - w) / 2, (pos - 1) * (cellH + gap) + (cellH - h) / 2)
+            else
+                pf:SetPoint("BOTTOMLEFT", RS, "BOTTOMLEFT", (pos - 1) * (cellW + gap) + (cellW - w) / 2, (cellH - h) / 2)
+            end
+            pf.pipStyle = pstyle
+            pf.cdStart, pf.cdDuration = nil, nil
+            pf.cd:Clear()
+            -- every part is hidden, then the ones of the style are shown
+            pf.fill:Hide(); pf.line:Hide(); pf.cd:Hide(); pf.gbg:Hide(); pf.gskull:Hide(); pf.geyes:Hide()
+            pf.fill:RemoveMaskTexture(pf.mask)
+            pf.fill:ClearAllPoints()
+            pf.mask:ClearAllPoints()
+            if pstyle == "flat" then
+                pf.fill:SetAllPoints(pf)
+                pf.mask:SetAllPoints(pf.fill)
+                pf.fill:AddMaskTexture(pf.mask)
+                pf.fill:SetColorTexture(color[1], color[2], color[3], 1)
+                pf.fill:Show()
+            elseif pstyle == "ring" or pstyle == "framed" then
+                local line = (pstyle == "ring") and (FX_DIR .. "pipring.tga") or (FX_DIR .. "pipframe.tga")
+                pf.line:ClearAllPoints()
+                pf.line:SetAllPoints(pf)
+                pf.line:SetTexture(line)
+                pf.line:SetVertexColor(color[1], color[2], color[3], 1)
+                pf.line:Show()
+                pf.cd:ClearAllPoints()
+                pf.cd:SetAllPoints(pf)
+                pf.cd:SetSwipeTexture(line)
+                pf.cd:SetSwipeColor(color[1], color[2], color[3], 1)
+                pf.cd:Show()
+                -- the filling inside (it lights up when the point is there)
+                local inset = math.max(2, math.floor(math.min(w, h) * 0.24))
+                pf.fill:SetPoint("TOPLEFT", pf, "TOPLEFT", inset, -inset)
+                pf.fill:SetPoint("BOTTOMRIGHT", pf, "BOTTOMRIGHT", -inset, inset)
+                if pstyle == "ring" then
+                    pf.mask:SetAllPoints(pf.fill)
+                    pf.fill:AddMaskTexture(pf.mask)
+                end
+                pf.fill:SetColorTexture(color[1], color[2], color[3], 1)
+                pf.fill:Show()
+            else   -- "game": the rune of the game: a round plate with the skull inside it
+                local sc = ({ Blood = { 0.85, 0.1, 0.1 }, Frost = { 0.3, 0.65, 1 }, Unholy = { 0.45, 0.85, 0.2 } })[specName]
+                pf.specColor = sc
+                pf.gbg:ClearAllPoints()
+                pf.gbg:SetAllPoints(pf)
+                pf.gbg:SetTexture(FX_MASK)   -- (the plate is a round disc)
+                pf.gbg:Show()
+                local inset = math.max(1, math.floor(math.min(w, h) * 0.13))
+                pf.gskull:ClearAllPoints()
+                pf.gskull:SetPoint("TOPLEFT", pf, "TOPLEFT", inset, -inset)
+                pf.gskull:SetPoint("BOTTOMRIGHT", pf, "BOTTOMRIGHT", -inset, inset)
+                pf.geyes:ClearAllPoints()
+                pf.geyes:SetPoint("TOPLEFT", pf, "TOPLEFT", inset, -inset)
+                pf.geyes:SetPoint("BOTTOMRIGHT", pf, "BOTTOMRIGHT", -inset, inset)
+                pf.gskull:Show()
+                -- the outline of the plate lights up when the rune is ready
+                pf.line:ClearAllPoints()
+                pf.line:SetAllPoints(pf)
+                pf.line:SetTexture(FX_DIR .. "pipring.tga")
+                pf.line:SetVertexColor(sc[1], sc[2], sc[3], 0.3)
+                pf.line:Show()
+                -- the recharge sweeps round the plate, in a circle
+                pf.cd:ClearAllPoints()
+                pf.cd:SetAllPoints(pf)
+                pf.cd:SetSwipeTexture(FX_MASK)
+                pf.cd:SetUseCircularEdge(true)
+                pf.cd:SetSwipeColor(sc[1], sc[2], sc[3], 0.6)
+                pf.cd:Show()
+            end
+            pf:Show()
+        end
+    end
+    -- the percent is read through a curve that turns 0..1 into 0..100 (the game hides the plain number in combat)
+    ind.curve100 = nil
+    local okC, curve = pcall(function()
+        local c = C_CurveUtil.CreateCurve()
+        c:SetType(Enum.LuaCurveType.Linear)
+        c:AddPoint(0, 0)
+        c:AddPoint(1, 100)
+        return c
+    end)
+    if okC then ind.curve100 = curve end
+end
+
+-- fills the resource with what it shows: the game hides health and the main resource in combat (they are secret values), but a
+-- status bar and a text may be given a secret value to show, so nothing is compared or calculated with them here.
+function HeadsUpAuras_UpdateResource(ind)
+    local cfg, RS = ind.cfg, ind.RS
+    if not cfg or cfg.kind ~= "resource" or not RS then return end
+    local what = cfg.resWhat or "health"
+    local shape = ind.resShape or "bar"
+    local placing = ind.editing or ind.preview or ind.dragging
+    local cur, max, pct
+    if placing then
+        -- while it is placed: a sample, so that the look can be judged out of combat too
+        max = (shape == "pips") and (ind.pipCount or 5) or 100
+        cur = (shape == "pips") and math.max(0, max - 2) or 65
+        pct = 65
+    else
+        local ok = pcall(function()
+            if what == "health" then
+                cur, max = UnitHealth("player"), UnitHealthMax("player")
+                if ind.curve100 then pct = UnitHealthPercent("player", true, ind.curve100) end
+            elseif what == "power" and ind.primaryType then
+                cur, max = UnitPower("player", ind.primaryType), UnitPowerMax("player", ind.primaryType)
+                if ind.curve100 then pct = UnitPowerPercent("player", ind.primaryType, false, ind.curve100) end
+            elseif what == "second" and ind.secType then
+                cur = SecondaryCount(ind.secType)   -- a plain number (runes ready, holy power...), or nil
+                max = UnitPowerMax("player", ind.secType)
+                if type(cur) == "number" and type(max) == "number" and not issecretvalue(max) and max > 0 then
+                    pct = cur / max * 100
+                end
+            end
+        end)
+        if not ok and not ind.resErrorShown then
+            ind.resErrorShown = true
+            LogError("HeadsUp Auras resource: could not read " .. what)
+        end
+    end
+    if shape == "bar" then
+        pcall(RS.bar.SetMinMaxValues, RS.bar, 0, max or 1)
+        pcall(RS.bar.SetValue, RS.bar, cur or 0)
+    elseif shape == "pips" then
+        local color = ind.resColor or { 1, 1, 1 }
+        local lit = (type(cur) == "number" and not issecretvalue(cur)) and cur or 0
+        local runes = (ind.secType == 5)
+        local specName = ind.runeSpec or "Blood"
+        -- The runes of the game are in fixed places, and the one that was used is not always the first. So they are put in a
+        -- flow: the ready ones come first, then the ones that recharge, the one that will be ready sooner before the others.
+        local sorted
+        if runes and not placing then
+            local items, okAll = {}, true
+            for r = 1, (ind.pipCount or 0) do
+                local okR, s0, d0, ready = pcall(GetRuneCooldown, r)
+                if not okR or issecretvalue(ready) or issecretvalue(s0) or issecretvalue(d0) then
+                    okAll = false
+                    break
+                end
+                items[#items + 1] = { ready = (ready == true), start = s0, duration = d0, ends = (s0 or 0) + (d0 or 0), r = r }
+            end
+            if okAll then
+                table.sort(items, function(a, b)
+                    if a.ready ~= b.ready then return a.ready end
+                    if a.ready then return a.r < b.r end
+                    if a.ends ~= b.ends then return a.ends < b.ends end
+                    return a.r < b.r
+                end)
+                sorted = items
+            end
+        end
+        for i, pf in ipairs(RS.pips) do
+            if i <= (ind.pipCount or 0) then
+                local on = i <= lit
+                local start, duration
+                local info = sorted and sorted[i]
+                if info then
+                    -- a rune: ready, or recharging from "start" for "duration" seconds (readable in combat)
+                    on = info.ready
+                    if not on and info.start and info.duration and info.duration > 0 then start, duration = info.start, info.duration end
+                elseif placing and not on then
+                    start, duration = GetTime() - 4, 10   -- (a sample of a point that is recharging)
+                    if pf.cdStart then start, duration = pf.cdStart, pf.cdDuration end
+                end
+                local pstyle = pf.pipStyle
+                if pstyle == "flat" then
+                    pf.fill:SetColorTexture(color[1], color[2], color[3], on and 1 or 0.18)
+                else
+                    -- the filling of the outline follows the recharge; when it is there the point lights up
+                    if on then
+                        pf.cd:Clear()
+                        pf.cdStart, pf.cdDuration = nil, nil
+                    elseif start and (pf.cdStart ~= start or pf.cdDuration ~= duration) then
+                        pf.cd:SetCooldown(start, duration)
+                        pf.cdStart, pf.cdDuration = start, duration
+                    elseif not start then
+                        pf.cd:Clear()
+                        pf.cdStart, pf.cdDuration = nil, nil
+                    end
+                    if pstyle == "game" then
+                        local sc = pf.specColor or { 0.3, 0.65, 1 }
+                        if on then
+                            pf.gbg:SetVertexColor(sc[1] * 0.3, sc[2] * 0.3, sc[3] * 0.3, 0.95)
+                        else
+                            pf.gbg:SetVertexColor(0.06, 0.06, 0.08, 0.9)
+                        end
+                        pf.gskull:SetAtlas(on and ("UF-DKRunes-" .. specName .. "-SkullActive") or "UF-DKRunes-SkullDis")
+                        pf.geyes:SetAtlas("UF-DKRunes-" .. specName .. "-Eyes")
+                        pf.geyes:SetShown(on)
+                        pf.line:SetVertexColor(sc[1], sc[2], sc[3], on and 1 or 0.3)
+                    else
+                        pf.line:SetVertexColor(color[1], color[2], color[3], on and 1 or 0.3)
+                        pf.fill:SetShown(on)
+                    end
+                end
+            end
+        end
+    end
+    -- the written value
+    local show = cfg.resShow or "percent"
+    if show == "none" or shape == "pips" or what == "second" then
+        RS.text:SetText("")
+    elseif show == "percent" then
+        if pct == nil then
+            RS.text:SetText("")
+        elseif issecretvalue(pct) then
+            if not pcall(RS.text.SetFormattedText, RS.text, "%d%%", pct) then RS.text:SetText("") end
+        else
+            RS.text:SetFormattedText("%d%%", math.floor(pct + 0.5))
+        end
+    else   -- "number"
+        if cur == nil then
+            RS.text:SetText("")
+        elseif issecretvalue(cur) then
+            local okF, text = pcall(BreakUpLargeNumbers, cur)
+            if okF and text ~= nil and pcall(RS.text.SetText, RS.text, text) then
+                -- (written with the separators of the game)
+            elseif not pcall(RS.text.SetFormattedText, RS.text, "%d", cur) then
+                RS.text:SetText("")
+            end
+        else
+            local okF, text = pcall(BreakUpLargeNumbers, cur)
+            RS.text:SetText(okF and text or tostring(cur))
+        end
+    end
+end
+
 -- the progress bar: where the track, the fill and the small icon sit
 local function ApplyBar(ind, cfg, width, height)
     local bar = ind.bar
-    if cfg.shape ~= "bar" or cfg.kind == "counter" then   -- (the bar of a counter is made by its own text, see HeadsUpAuras_UpdateCounter)
+    if cfg.shape ~= "bar" or cfg.kind == "counter" or cfg.kind == "resource" then   -- (the bar of a counter is made by its own text, see HeadsUpAuras_UpdateCounter)
         bar:Hide()
         return
     end
@@ -2147,10 +2552,11 @@ local function ApplyConfig(ind)
     -- (a long box with the picture, the name and the number written in it); only an icon has the picture frame
     local counterShape = isCounter and ((cfg.shape == "square" or cfg.shape == "round") and "icon"
         or (cfg.shape == "bar" and "bar" or "text")) or nil
-    local isBar = cfg.shape == "bar" and not isCounter
+    local isResource = cfg.kind == "resource"
+    local isBar = cfg.shape == "bar" and not isCounter and not isResource
     for _, face in ipairs(ind.faces) do
-        face.I:SetShown(not isBar and (not isCounter or counterShape == "icon"))
-        if isBar or isCounter then
+        face.I:SetShown(not isBar and not isResource and (not isCounter or counterShape == "icon"))
+        if isBar or isCounter or isResource then
             face.rim:Hide()
             face.glow:Hide()
             face.pulse:Stop()
@@ -2192,6 +2598,9 @@ local function ApplyConfig(ind)
         end
         HeadsUpAuras_UpdateCounter(ind)
     end
+    -- a resource: the bar, the text or the pips, with the chosen look
+    ind.RS:SetShown(isResource)
+    if isResource then HeadsUpAuras_ApplyResource(ind, width, height) end
     -- display priority: a higher layer is drawn above the lower ones
     for _, part in ipairs(ind.parts) do part:SetFrameStrata(strata) end
     for _, face in ipairs(ind.faces) do
@@ -2221,14 +2630,14 @@ local function ApplyConfig(ind)
         ind.secType = resources.secondary.type
     end
 
-    if cfg.spellID and cfg.kind ~= "counter" then
+    if cfg.spellID and cfg.kind ~= "counter" and cfg.kind ~= "resource" then
         ind.hasCooldown = AbilityHasCooldown(cfg.spellID)   -- (false must stay false)
     else
         ind.hasCooldown = nil
     end
 
     ind.powerType = nil
-    if cfg.spellID and cfg.kind ~= "counter" then
+    if cfg.spellID and cfg.kind ~= "counter" and cfg.kind ~= "resource" then
         local picture = cfg.icon or C_Spell.GetSpellTexture(cfg.spellID)
         -- a picture that is not square is cut, not stretched: the middle of it is shown
         local left, right, top, bottom = 0, 1, 0, 1
@@ -2346,7 +2755,7 @@ end
 
 -- is the aura in the list of this character? (an ability: of its class; a counter: by who it is for)
 function HeadsUpAuras_AuraListed(a)
-    if a.kind == "counter" then
+    if a.kind == "counter" or a.kind == "resource" then
         local who = a.ctWho or "spec"
         if who == "all" or who == "prof" then return true end
         if who == "char" then return a.ctChar == nil or a.ctChar == HeadsUpAuras_CharKey() end
@@ -2582,7 +2991,7 @@ function HeadsUpAuras_IsDirty()
             for i = 1, #a do
                 if a[i].uid ~= b[i].uid or a[i].state ~= b[i].state then return true end
             end
-        elseif k == "barColor" or k == "ctColor" or k == "ctBg" then
+        elseif k == "barColor" or k == "ctColor" or k == "ctBg" or k == "resColor" then
             local a, b = draft[k] or {}, saved[k] or {}
             for i = 1, 3 do
                 if a[i] ~= b[i] then return true end
@@ -2605,6 +3014,14 @@ function HeadsUpAuras_IsDirty()
 end
 
 -- Snapshot of every aura's live state, for the log file (what the add-on sees right now).
+-- where the frame of an aura really is: the distance of its centre from the centre of the screen
+local function Where(ind)
+    local cx, cy = ind.A:GetCenter()
+    local ux, uy = UIParent:GetCenter()
+    if cx and ux then return string.format("%.0f,%.0f", cx - ux, cy - uy) end
+    return "?"
+end
+
 function HeadsUpAuras_DebugState()
     local out = {}
     local function Safe(fn, ...)
@@ -2672,6 +3089,9 @@ function HeadsUpAuras_DebugState()
                 .. " crowdRule=" .. (a.crowdEnabled and ((a.crowdMetric or "combat") .. " " .. (a.crowdOp or ">=") .. " " .. tostring(a.crowdN or 2)) or "off")
                 .. " iconVisible=" .. Safe(ind.I.GetEffectiveAlpha, ind.I)
                 .. " editing=" .. YesNo(ind.editing) .. " selected=" .. YesNo(ind.preview)
+                .. " kind=" .. tostring(a.kind) .. " saved=" .. (a.pos and (tostring(a.pos[3]) .. "," .. tostring(a.pos[4])) or "none")
+                .. " frame=" .. (ind.cfg and ind.cfg.pos and (tostring(ind.cfg.pos[3]) .. "," .. tostring(ind.cfg.pos[4])) or "none")
+                .. " at=" .. Where(ind) .. " size=" .. string.format("%.0fx%.0f", ind.A:GetWidth() or 0, ind.A:GetHeight() or 0)
         end
     end
     return out
@@ -3479,7 +3899,7 @@ driver:SetScript("OnUpdate", function(_, elapsed)
     end
     ForEachIndicator(function(ind)
         local cfg = ind.cfg
-        if cfg and (cfg.kind == "counter" or cfg.cdEnabled or cfg.chargesEnabled or cfg.suppressEnabled or cfg.buffEnabled
+        if cfg and (cfg.kind == "counter" or cfg.kind == "resource" or cfg.cdEnabled or cfg.chargesEnabled or cfg.suppressEnabled or cfg.buffEnabled
             or cfg.lingerEnabled or cfg.availEnabled or cfg.secEnabled or cfg.soundEnabled
             or cfg.formEnabled or cfg.tgtHostileEnabled or cfg.tgtTypeEnabled or cfg.tgtClassEnabled
             or cfg.threatEnabled or cfg.showWhenEnabled or HasCue(cfg) or (cfg.otherAuras and cfg.otherAuras[1]) or cfg.crowdEnabled)

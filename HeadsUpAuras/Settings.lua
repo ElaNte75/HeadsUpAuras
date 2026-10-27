@@ -726,8 +726,19 @@ local KIND_LIST = {
     { value = "ability", text = "Ability" },
     { value = "tracker", text = "Tracker" },
     { value = "counter", text = "Counter" },
+    { value = "resource", text = "Resource" },
 }
-local KIND_SUFFIX = { ability = "", tracker = " Tracker", counter = "" }
+local KIND_SUFFIX = { ability = "", tracker = " Tracker", counter = "", resource = "" }
+
+-- the names of what a resource can show, for this class: health, the main resource (Runic Power, Mana...), the second resource
+local RESOURCE_ICON = { health = "Interface\\Icons\\INV_Potion_54", power = "Interface\\Icons\\INV_Potion_76",
+    second = "Interface\\Icons\\INV_Misc_Rune_01" }
+local function ResourceName(what)
+    local r = HeadsUpAuras_GetResources()
+    if what == "power" then return r.primary and r.primary.name or "Main resource" end
+    if what == "second" then return r.secondary and r.secondary.name or "Second resource" end
+    return "Health"
+end
 
 -- { seconds, "enemy" or "self" } for an ability whose effect we know (KnownDurations.lua), else nil
 local function KnownDuration(name)
@@ -771,8 +782,29 @@ end
 
 local function SetKind(d, kind)
     if (d.kind or "ability") == kind then return end
-    local wasCounter = (d.kind == "counter")
+    local wasCounter = (d.kind == "counter" or d.kind == "resource")
     d.kind = kind
+    if kind == "resource" then
+        -- a resource shows your health or a resource of your class: no ability, nothing about the target
+        for _, key in ipairs({ "healthEnabled", "powerEnabled", "secEnabled", "cdEnabled", "chargesEnabled",
+            "availEnabled", "buffEnabled", "buffAlways", "soundEnabled", "tgtHostileEnabled", "enemyAliveEnabled",
+            "enemyEnabled", "tgtTypeEnabled", "tgtClassEnabled", "threatEnabled", "crowdEnabled", "formEnabled",
+            "suppressEnabled", "suppressReset" }) do
+            d[key] = false
+        end
+        d.otherAuras, d.trackShow, d.buffIgnore = nil, "hide", {}
+        d.shape, d.effect = "bar", "none"
+        d.width, d.height, d.sizeLinked = 200, 20, false
+        d.ctBg, d.ctBgAlpha, d.ctSize, d.ctColor = { 0, 0, 0 }, 20, 12, { 1, 1, 1 }
+        d.ctWho, d.ctChar = "all", HeadsUpAuras_CharKey()
+        d.itemID, d.currencyID = nil, nil
+        d.resWhat, d.resShow, d.resTextPos, d.resColor, d.resDir = "health", "percent", "center", nil, "right"
+        d.spellID = 0   -- (a resource has no spell: 0 only says that the aura has its subject)
+        d.icon = RESOURCE_ICON.health
+        d.name = HeadsUpAuras_UniqueName(ResourceName("health"), HeadsUpAuras_GetEditIndex())
+        UI.Changed()
+        return
+    end
     if kind == "counter" then
         -- a counter is text: every condition about abilities and the target is off, and it starts as a long, low box
         for _, key in ipairs({ "healthEnabled", "powerEnabled", "secEnabled", "cdEnabled", "chargesEnabled",
@@ -1048,7 +1080,83 @@ local function BuildCounterAuraPage(page)
     })
 end
 
-local function BuildAuraPage(page, tracker, part, counter)
+-- the Aura step of a resource: what to make, what to show (your health, the main resource or the second one) and its name
+local function BuildResourceAuraPage(page)
+    local card = page:Card("Resource")
+    AddKindField(card)
+    card:Field({
+        label = "What to show",
+        tip = Tip("What to show", "Health: your health. The main resource: Runic Power, Mana, Rage... of your class. The second resource: Runes, Holy Power, Combo Points, Soul Shards, Chi, Essence... if your class has one.", "In combat the game hides the numbers of your health and your main resource, but a bar can still show them, and a percent too."),
+        controls = {
+            Choice("resWhat", function()
+                local r = HeadsUpAuras_GetResources()
+                local list = { { value = "health", text = "Health" } }
+                if r.primary then list[#list + 1] = { value = "power", text = r.primary.name } end
+                if r.secondary then list[#list + 1] = { value = "second", text = r.secondary.name } end
+                return list
+            end, "health", {
+                onPick = function(value)
+                    local d = HeadsUpAuras_GetDraft()
+                    if not d then return end
+                    -- the name follows what is shown, unless it was given a name of its own
+                    local auto = not d.name
+                    for _, what in ipairs({ "health", "power", "second" }) do
+                        local n = ResourceName(what)
+                        if d.name and (d.name == n or d.name:match("^" .. n:gsub("%p", "%%%0") .. " %d+$")) then auto = true end
+                    end
+                    if auto then d.name = HeadsUpAuras_UniqueName(ResourceName(value), HeadsUpAuras_GetEditIndex()) end
+                    d.icon = RESOURCE_ICON[value]
+                    d.resShow = (value == "second") and "none" or "percent"
+                    if value ~= "second" then d.shape = "bar" end
+                    if value == "second" and d.shape ~= "circles" then d.shape = "bar" end
+                    -- the runes and the other points start narrower than a bar of health
+                    if value == "second" and d.width == 200 and d.height == 20 then d.width = 150 end
+                    if value ~= "second" and d.width == 150 and d.height == 20 then d.width = 200 end
+                    d.resStyle = (d.shape == "circles") and "flat" or "segmented"
+                    UI.Changed()
+                end,
+            }),
+        },
+    })
+    card:Field({
+        label = "Name",
+        tip = Tip("Name", "The name of the aura in the list on the left.", "Two auras cannot have the same name: a number is added to the second one."),
+        controls = {
+            {
+                type = "input", span = 3, extra = WIDE_EXTRA, maxLetters = 40, noApply = true,
+                get = function(d) return d.name or "" end,
+                set = function(d, text)
+                    text = strtrim(text)
+                    d.name = (text ~= "") and text or nil
+                end,
+            },
+        },
+    })
+    card:Field({
+        label = "Icon",
+        usable = HasAbility,
+        tip = Tip("Icon", "The small picture of this aura in the list on the left. Choose any picture of the game, or go back to the usual one.", "It is only for the list: the aura itself shows the bar, the text or the circles."),
+        controls = {
+            {
+                type = "icon", text = "Choose", w = HALF_W, gap = SPLIT_GAP,
+                tip = Tip("Choose", "Pick a picture for the list, from the pictures of the game."),
+                icon = function(d) return d.icon end,
+                onClick = function() TogglePicker() end,
+            },
+            {
+                type = "button", text = "Usual icon", w = HALF_W,
+                tip = Tip("Usual icon", "Go back to the usual picture of this resource.", "Grey while the picture is the usual one."),
+                enabled = function(d) return d.icon ~= RESOURCE_ICON[d.resWhat or "health"] end,
+                onClick = function(d)
+                    d.icon = RESOURCE_ICON[d.resWhat or "health"]
+                    UI.Changed()
+                end,
+            },
+        },
+    })
+end
+
+local function BuildAuraPage(page, tracker, part, counter, resource)
     -- part: "identity" (what it is), "look" (how it looks), or nil (both, for a debuff tracker)
     -- counter: the look of a counter (text), which has fields of its own and none of the icon's
     if part ~= "look" then
@@ -1132,6 +1240,155 @@ local function BuildAuraPage(page, tracker, part, counter)
 
     if part ~= "identity" then
         local look = page:Card("Appearance")
+        if resource then
+            local SHAPES = function(d)
+                local list = { { value = "bar", text = "Bar" } }
+                if d.resWhat == "second" then
+                    list[#list + 1] = { value = "circles", text = "Circles" }
+                end
+                return list
+            end
+            local function isBar(d) return d.shape == "bar" or d.shape == "squares" or d.shape == nil end
+            look:Field({
+                label = "Shape",
+                usable = HasAbility,
+                shown = function(d) return d.resWhat == "second" end,   -- (health and the main resource are a bar)
+                tip = Tip("Shape", "Bar: a bar that fills as the value rises (for the second resource it is cut in one part for each point: each rune, Holy Power...). Circles: one little circle for each point of the second resource, lit while you have it.", "Only the second resource can choose: health and the main resource are a bar."),
+                controls = { Choice("shape", SHAPES, "bar", {
+                    -- each shape has its own presets: the first one is the starting point
+                    onPick = function(value)
+                        local d = HeadsUpAuras_GetDraft()
+                        if d then
+                            d.resStyle = (value == "circles") and "flat" or "segmented"
+                            UI.Changed()
+                        end
+                    end,
+                }) },
+            })
+            -- the presets (looks) of the points of the second resource: for circles, and for a bar
+            local function presets(d)
+                if d.shape == "circles" then
+                    local list = { { value = "flat", text = "Flat" }, { value = "ring", text = "Ring (fills)" } }
+                    local r = HeadsUpAuras_GetResources()
+                    if r.secondary and r.secondary.type == 5 then   -- (the runes of the Death Knight)
+                        list[#list + 1] = { value = "game", text = "Game runes" }
+                    end
+                    return list
+                end
+                return { { value = "segmented", text = "Segmented" }, { value = "framed", text = "Framed squares" } }
+            end
+            local function presetValue(d)
+                local list = presets(d)
+                for _, item in ipairs(list) do
+                    if item.value == d.resStyle then return item.value end
+                end
+                return list[1].value
+            end
+            look:Field({
+                label = "Preset",
+                usable = HasAbility,
+                shown = function(d) return d.resWhat == "second" end,
+                tip = Tip("Preset", "The look of the points of the second resource. Circles: Flat (a solid circle), Ring (a ring that fills as the rune recharges and lights up when it is ready), Game runes (the runes of the game; Death Knight only). Bar: Segmented (one bar cut in parts) or Framed squares (separate squares with an outline that fills as the rune recharges).", "Only the runes have a recharge to follow: for the other points (Holy Power, combo points...) the ring and the squares just light up."),
+                controls = {
+                    {
+                        type = "dropdown",
+                        text = function(d)
+                            local v = presetValue(d)
+                            for _, item in ipairs(presets(d)) do
+                                if item.value == v then return item.text end
+                            end
+                            return ""
+                        end,
+                        items = function(d)
+                            local items = {}
+                            for _, item in ipairs(presets(d)) do
+                                items[#items + 1] = {
+                                    text = item.text,
+                                    selected = function() return presetValue(d) == item.value end,
+                                    onClick = function()
+                                        d.resStyle = item.value
+                                        UI.Changed()
+                                    end,
+                                }
+                            end
+                            return items
+                        end,
+                    },
+                },
+            })
+            look:Field({
+                label = "Fills toward",
+                usable = HasAbility,
+                tip = Tip("Fills toward", "The side the bar grows toward as the value rises. For circles: the side the first circle is.", "Not used by the Text."),
+                controls = { Choice("resDir", { { value = "right", text = "Right" }, { value = "left", text = "Left" },
+                    { value = "up", text = "Up" }, { value = "down", text = "Down" } }, "right") },
+            })
+            look:Field({
+                label = "Bar color",
+                usable = HasAbility,
+                tip = Tip("Bar color", "The color of the bar, or of the squares and circles that are lit. Click the square to choose any color; Automatic goes back to the color of the resource (the runes take the color of your specialization).", "Automatic is the color of the resource."),
+                controls = {
+                    {
+                        type = "color", w = UI.DropdownWidth(), gap = L.PAIR_GAP,
+                        get = function(d) return d.resColor or HeadsUpAuras_ResourceAutoColor(d.resWhat or "health") end,
+                        set = function(d, rgb) d.resColor = rgb end,
+                    },
+                    {
+                        type = "button", text = "Automatic", w = UI.DropdownWidth(),
+                        tip = Tip("Automatic", "Goes back to the color of the resource.", "Grey while the color is the automatic one."),
+                        enabled = function(d) return d.resColor ~= nil end,
+                        onClick = function(d)
+                            d.resColor = nil
+                            UI.Changed()
+                        end,
+                    },
+                },
+            })
+            look:Field({
+                label = "Show the value",
+                usable = HasAbility,
+                shown = function(d) return d.resWhat ~= "second" end,   -- (the points of the second resource have no value to write)
+                tip = Tip("Show the value", "Writes the value on the bar: none, the number, or the percent.", "In combat the game hides the plain number of your health and of your main resource, but the bar and the percent can still be shown. If the number does not appear in combat, use the percent."),
+                controls = { Choice("resShow", { { value = "none", text = "Nothing" }, { value = "number", text = "Number" },
+                    { value = "percent", text = "Percent" } }, "percent") },
+            })
+            look:Field({
+                label = "Written on the",
+                usable = HasAbility,
+                shown = function(d) return d.resWhat ~= "second" end,
+                tip = Tip("Written on the", "Where the value is written on the bar: at the left end, in the middle or at the right end.", "Only for a bar."),
+                controls = { Choice("resTextPos", { { value = "left", text = "Left" }, { value = "center", text = "Middle" },
+                    { value = "right", text = "Right" } }, "center") },
+            })
+            look:Field({
+                label = "Text size",
+                shown = function(d) return d.resWhat ~= "second" end,
+                tip = Tip("Text size", "The size of the text, in pixels (from 8 to 64).", "The box (Size below) must be big enough for the text."),
+                controls = { Number("ctSize", 8, 64, 12, "px") },
+            })
+            look:Field({
+                label = "Text color",
+                shown = function(d) return d.resWhat ~= "second" end,
+                tip = Tip("Text color", "The color of the text. Click the square to choose any color from a small palette."),
+                controls = { { type = "color", w = UI.DropdownWidth(), gap = 0,
+                    get = function(d) return d.ctColor or { 1, 1, 1 } end,
+                    set = function(d, rgb) d.ctColor = rgb end } },
+            })
+            look:Field({
+                label = "Background",
+                tip = Tip("Background", "The color of the box behind the bar or the circles. Click the square to choose any color from a small palette.", "How solid it is, you choose below (Background opacity)."),
+                controls = { { type = "color", w = UI.DropdownWidth(), gap = 0,
+                    get = function(d) return d.ctBg or { 0, 0, 0 } end,
+                    set = function(d, rgb) d.ctBg = rgb end } },
+            })
+            local OPACITIES = {}
+            for pct = 0, 100, 10 do OPACITIES[#OPACITIES + 1] = { value = pct, text = pct .. "%" } end
+            look:Field({
+                label = "Background opacity",
+                tip = Tip("Background opacity", "How solid the background is, in percent: 0% is no background at all, 100% is a solid box, in between you see through it."),
+                controls = { Choice("ctBgAlpha", OPACITIES, 20) },
+            })
+        end
         if counter then
             -- first what the counter is (text, an icon with the number on it, or a bar), then what is written in it
             local SHAPES = { { value = "text", text = "Text" }, { value = "square", text = "Square icon" },
@@ -1159,25 +1416,25 @@ local function BuildAuraPage(page, tracker, part, counter)
             })
             look:Field({
                 label = "Icon",
-                usable = isBar,
+                shown = isBar,
                 tip = Tip("Icon", "The icon of the item, at one end of the bar: as high as the bar. Choose the end, or Off to leave it out.", "Only for a bar. Grey for Text (only the number) and for an icon (the icon is the picture)."),
                 controls = { Choice("ctIcon", { PLACES[1], PLACES[2], PLACES[4] }, "left") },
             })
             look:Field({
                 label = "Name",
-                usable = isBar,
+                shown = isBar,
                 tip = Tip("Name", "The name written in the bar: the Name you gave the aura on the Aura step (by default the real name of the item, so you can change it). Choose where it is written, or Off to write only the number.", "Only for a bar. The addon measures the room: the name never covers the number, and a name that is too long is cut short with dots."),
                 controls = { Choice("ctName", PLACES, "left") },
             })
             look:Field({
                 label = "Number",
-                usable = isBar,
+                shown = isBar,
                 tip = Tip("Number", "How many you have in your bags. Choose where it is written in the bar: left, in the middle or on the right.", "A counter always writes its number. In Text and on an icon it is in the middle."),
                 controls = { Choice("ctNum", { PLACES[2], PLACES[3], PLACES[4] }, "right") },   -- (no Off: a counter always writes its number)
             })
             look:Field({
                 label = "Background",
-                usable = function(d) return d.shape == "text" or d.shape == "bar" end,
+                shown = function(d) return d.shape == "text" or d.shape == "bar" end,
                 tip = Tip("Background", "The color of the box behind the text or the bar. Click the square to choose any color from a small palette.", "How solid it is, you choose below (Background opacity). Grey for an icon: the picture is its background."),
                 controls = {
                     {
@@ -1191,7 +1448,7 @@ local function BuildAuraPage(page, tracker, part, counter)
             for pct = 0, 100, 10 do OPACITIES[#OPACITIES + 1] = { value = pct, text = pct .. "%" } end
             look:Field({
                 label = "Background opacity",
-                usable = function(d) return d.shape == "text" or d.shape == "bar" end,
+                shown = function(d) return d.shape == "text" or d.shape == "bar" end,
                 tip = Tip("Background opacity", "How solid the background is, in percent: 0% is no background at all (only the text shows), 100% is a solid box, in between you see through it.", "Grey for an icon."),
                 controls = { Choice("ctBgAlpha", OPACITIES, 20) },
             })
@@ -1212,7 +1469,7 @@ local function BuildAuraPage(page, tracker, part, counter)
                 },
             })
         end
-        if not counter then look:Field({
+        if not counter and not resource then look:Field({
             label = "Shape",
             usable = HasAbility,
             tip = Tip("Shape", "Square: the icon as it is. Round: the picture cut to a circle, with a rim that follows the Empowered effect (frost, blood, poison...), so that icon and effect look like one thing. Bar: a progress bar that empties while the effect lasts (Tracker).", "A round icon is as wide as it is high (the larger of the two sizes)."),
@@ -1255,7 +1512,7 @@ local function BuildAuraPage(page, tracker, part, counter)
         end
         look:Field({
             label = "Size",
-            usable = function(d) return not (d.kind == "counter" and d.shape == "text") end,   -- (a text box is as big as its number)
+            shown = function(d) return not (d.kind == "counter" and d.shape == "text") end,   -- (a text box is as big as its number)
             tip = Tip("Size", "The width and the height of the icon, the bar or the box, in pixels (W and H).", "Click the = between them to set them separately. Grey for the Text of a counter: its box is as big as the number."),
             controls = {
                 dimension("width", "height", "W", LINK_PAD),
@@ -1329,15 +1586,17 @@ local function BuildAuraPage(page, tracker, part, counter)
             controls = { coordinate(1, "X"), coordinate(2, "Y") },
         })
 
-        if not counter then look:Field({
+        if not counter and not resource then look:Field({
             label = "Bar empties toward",
-            usable = function(d) return HasAbility(d) and d.shape == "bar" end,
+            usable = HasAbility,
+            shown = function(d) return d.shape == "bar" end,
             tip = Tip("Bar direction", "Left: the bar shrinks toward the left side. Right: it shrinks toward the right side."),
             controls = { Choice("barDrain", { { value = "left", text = "Left" }, { value = "right", text = "Right" } }, "left") },
         })
         look:Field({
             label = "Bar color",
-            usable = function(d) return HasAbility(d) and d.shape == "bar" end,
+            usable = HasAbility,
+            shown = function(d) return d.shape == "bar" end,
             tip = Tip("Bar color", "The color of the bar. Click the square to choose any color from a small palette."),
             controls = {
                 {
@@ -1347,24 +1606,26 @@ local function BuildAuraPage(page, tracker, part, counter)
                 },
             },
         })
-        local function barUsable(d) return HasAbility(d) and d.shape == "bar" end
+        local function barUsable(d) return HasAbility(d) end
+        local function barShown(d) return d.shape == "bar" end
         look:Condition({
-            label = "Show the time", key = "barTimeOn", usable = barUsable,
+            label = "Show the time", key = "barTimeOn", usable = barUsable, shown = barShown,
             tip = Tip("Show the time", "Writes the seconds that are left on the bar. Choose where: at the left end, in the middle or at the right end."),
             controls = { Choice("barTime", { { value = "left", text = "Left" }, { value = "center", text = "Middle" }, { value = "right", text = "Right" } }, "right") },
         })
         look:Condition({
-            label = "Show the icon", key = "barIconOn", usable = barUsable,
+            label = "Show the icon", key = "barIconOn", usable = barUsable, shown = barShown,
             tip = Tip("Show the icon", "A small picture of the ability at one end of the bar. Choose the side."),
             controls = { Choice("barIcon", { { value = "left", text = "Left" }, { value = "right", text = "Right" } }, "left") },
         })
         look:Field({
             label = "Show effect",
             tip = Tip("Show effect", "A ring around the icon, whenever the icon shows. It works on its own: the Empowered effect below is a separate thing and can be used together with it, or instead of it.", "None: nothing.  Glow: a pulsing ring.  Pulse: a pulsing ring, and the icon breathes."),
-            usable = function(d) return HasAbility(d) and d.shape ~= "bar" end,
+            usable = HasAbility,
+            shown = function(d) return d.shape ~= "bar" end,
             controls = { Choice("effect", EFFECT_LIST, "none") },
         }) end
-        if not tracker and not counter then
+        if not tracker and not counter and not resource then
             look:Field({
                 label = "Empowered effect",
                 usable = ForAbility,
@@ -1487,8 +1748,8 @@ local function BuildConditionsPage(page)
     local NOTARGET = "With no target selected, a condition about the target is not met."
     target:Condition({
         label = "Target is a:", key = "tgtTypeEnabled", usable = HasAbility,
-        tip = Tip("Player or NPC", "Shows the icon only while your target is another player, or only while it is a creature (NPC).", NOTARGET),
-        controls = { Choice("tgtType", { { value = "npc", text = "NPC" }, { value = "player", text = "player" } }, "npc") },
+        tip = Tip("Player, NPC or Attackable", "Shows the icon only while your target is another player, a creature (NPC), or any target you can attack (Attackable).", NOTARGET),
+        controls = { Choice("tgtType", { { value = "npc", text = "NPC" }, { value = "player", text = "player" }, { value = "attackable", text = "Attackable" } }, "npc") },
     })
     target:Condition({
         label = "Hostility:", key = "tgtHostileEnabled", usable = HasAbility,
@@ -2141,6 +2402,11 @@ local STEPS = {
         tip = "What the counter is: what to make, the item that is counted (its id, its name, or dragged from your bags) and the name of the aura." },
     { label = "Appearance", build = function(page) BuildAuraPage(page, false, "look", true) end, modes = { counter = true },
         tip = "How it looks: where the picture, the name and the number are written, the color of the letters, the size of the letters and of the box and the place on the screen." },
+    -- a Resource (a bar, a text or pips for your health or a resource of your class) has Aura, Appearance and Situation
+    { label = "Aura", build = BuildResourceAuraPage, modes = { resource = true },
+        tip = "What the resource is: what to make, what it shows (your health, the main resource or the second resource) and its name." },
+    { label = "Appearance", build = function(page) BuildAuraPage(page, false, "look", false, true) end, modes = { resource = true },
+        tip = "How it looks: bar, text, squares or circles, its color, the value written on it, the size and the place on the screen." },
     { label = "Trigger", build = BuildTriggerPage, modes = { aura = true },
         tip = "When the aura shows: you (health, resources, form), your target (enemy or friendly, category, alive, health, attacking you), the ability (available, cooldown, charges, empowered) and the other auras of yours it is combined with." },
     -- a Tracker follows an effect with a timer of its own
@@ -2148,7 +2414,7 @@ local STEPS = {
         tip = "What the aura follows: how long the effect lasts, when it shows, and what starts it over." },
     { label = "Situation", build = BuildSituationPage, modes = { aura = true, follow = true },
         tip = "Where and for whom it shows: in combat, mounted, in a vehicle, stealthed, in a group, in a dungeon or raid, and for which specializations." },
-    { label = "Situation", build = function(page) BuildSituationPage(page, true) end, modes = { counter = true },
+    { label = "Situation", build = function(page) BuildSituationPage(page, true) end, modes = { counter = true, resource = true },
         tip = "Where and for whom it shows: in combat, mounted, in a vehicle, stealthed, in a group, in a dungeon or raid, and which of your characters see the counter." },
     -- a debuff tracker has only these two steps (everything about the target is copied from its aura)
     { label = "Display", build = function(page) BuildAuraPage(page, true) end, modes = { tracker = true },
@@ -2319,6 +2585,8 @@ local function UpdateChrome()
         wanted = "follow"
     elseif d and d.kind == "counter" then
         wanted = "counter"
+    elseif d and d.kind == "resource" then
+        wanted = "resource"
     end
     if wanted ~= mode then
         mode = wanted

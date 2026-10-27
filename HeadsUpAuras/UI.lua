@@ -558,9 +558,15 @@ end
 ------------------------------------------------------------
 local registry = {}
 
+local allCards = {}
+
 function UI.SyncAll()
     local d = HeadsUpAuras_GetDraft()
     for _, w in ipairs(registry) do w.Sync(d) end
+    -- a row that is not shown (def.shown(d) is false) takes no room: the rows under it move up
+    for _, card in ipairs(allCards) do
+        if card.dirty then card:Relayout() end
+    end
 end
 
 -- called after the player changed something: set UI.onChange to apply it and refresh
@@ -794,6 +800,38 @@ end
 
 local CardMethods = {}
 
+-- Remember a row that can be hidden: its frames and where they were put, so that Relayout can move them up when a row above is
+-- not shown. entry.shown follows def.shown(d) (nil = always shown).
+local function TrackRow(card, frames)
+    local entry = { frames = frames, base = {}, shown = true }
+    for i, f in ipairs(frames) do entry.base[i] = { f:GetPoint(1) } end
+    card.rows = card.rows or {}
+    card.rows[#card.rows + 1] = entry
+    return entry
+end
+
+-- put the rows in their places again: the rows that are not shown are skipped and the card gets shorter
+function CardMethods:Relayout()
+    self.dirty = false
+    local shift = 0
+    for _, e in ipairs(self.rows or {}) do
+        if e.shown then
+            for i, f in ipairs(e.frames) do
+                local b = e.base[i]
+                f:ClearAllPoints()
+                f:SetPoint(b[1], b[2], b[3], b[4], b[5] + shift)
+                f:Show()
+            end
+        else
+            shift = shift + L.ROW_H
+            for _, f in ipairs(e.frames) do f:Hide() end
+        end
+    end
+    self:SetHeight(self.used + 8 - shift)
+    self.page.y = self.top + self:GetHeight() + L.CARD_GAP
+    self.page.child:SetHeight(math.max(self.page.y - L.CARD_GAP, 10))
+end
+
 -- the next row; returns where the top of a control of that row is
 function CardMethods:AddRow()
     local y = self.used
@@ -883,11 +921,21 @@ function CardMethods:Field(def)
         hit:SetSize(spanW(labelSpan) + slack, L.CTRL_H)
         UI.Tip(hit, def.tip)
     end
+    local frames = { label }
+    if hit then frames[#frames + 1] = hit end
+    for _, c in ipairs(ctrls) do frames[#frames + 1] = c.frame end
+    local entry = TrackRow(self, frames)
+    local card = self
     registry[#registry + 1] = { Sync = function(d)
         local usable = d ~= nil and (def.usable == nil or def.usable(d)) and true or false
         if type(def.label) == "function" then label:SetText(d and def.label(d) or "") end
         label:SetTextColor(rgba(usable and C.text or C.disabled))
         for _, c in ipairs(ctrls) do c.Sync(d, usable) end
+        local vis = (d == nil) or def.shown == nil or def.shown(d) and true or false
+        if vis ~= entry.shown then
+            entry.shown = vis
+            card.dirty = true
+        end
     end }
     -- the row: it can be hidden and shown (SetShown), its top is rowY
     local row = { y = self.rowY, label = label, controls = ctrls, hit = hit }
@@ -922,6 +970,10 @@ function CardMethods:Condition(def)
         UI.Changed()
     end)
     if def.tip then UI.Tip(check, def.tip) end
+    local frames = { check }
+    for _, c in ipairs(ctrls) do frames[#frames + 1] = c.frame end
+    local entry = TrackRow(self, frames)
+    local card = self
     registry[#registry + 1] = { Sync = function(d)
         local usable = d ~= nil and (def.usable == nil or def.usable(d)) and true or false
         if type(def.label) == "function" then check.label:SetText(d and def.label(d) or "") end
@@ -929,6 +981,11 @@ function CardMethods:Condition(def)
         check:SetOn(usable)
         local on = usable and (d and get(d) and true or false)
         for _, c in ipairs(ctrls) do c.Sync(d, on) end
+        local vis = (d == nil) or def.shown == nil or def.shown(d) and true or false
+        if vis ~= entry.shown then
+            entry.shown = vis
+            card.dirty = true
+        end
     end }
 end
 
@@ -1081,6 +1138,7 @@ function UI.NewPage(parent)
         local card = UI.Box(child, C.card, C.border)
         for k, v in pairs(CardMethods) do card[k] = v end
         card.page = self
+        allCards[#allCards + 1] = card
         card.top = self.y
         card.used = L.TITLE_H
         card:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -self.y)
