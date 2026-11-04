@@ -41,7 +41,7 @@ local EFFECT_STRATA = { "LOW", "MEDIUM", "HIGH", "DIALOG", "FULLSCREEN" }
 -- How small the icon gets during "Pulse" (1 = not at all).
 local PULSE_SHRINK = 0.92
 
-local KEYS = { "class", "specs", "name", "hidden", "spellID", "healthEnabled", "healthOp", "healthPct", "enemyEnabled", "enemyOp", "enemyPct", "cdEnabled", "cdState", "chargesEnabled", "chargesState", "enemyAliveEnabled", "enemyAlive", "buffEnabled", "buffID", "buffState", "suppressEnabled", "suppressSeconds", "suppressReset", "uid", "trackerOf", "trackerCue", "kind", "trackShow", "barDrain", "barIcon", "barColor", "barTime", "barTimeOn", "barIconOn", "otherAuras", "crowdEnabled", "crowdOp", "crowdN", "crowdMetric", "group", "effect", "icon", "showWhenEnabled", "showRules", "lingerEnabled", "lingerSeconds", "layer", "availEnabled", "pos", "width", "height", "sizeLinked", "powerEnabled", "powerOp", "powerValue", "secEnabled", "secOp", "secValue", "buffAlways", "empowerFx", "soundEnabled", "soundKey", "soundVolume", "formEnabled", "formSpell", "tgtHostileEnabled", "tgtHostile", "tgtTypeEnabled", "tgtType", "tgtClassEnabled", "tgtClass", "threatEnabled", "threatState", "shape", "empowerLight", "itemID", "ctIcon", "ctName", "ctNum", "ctColor", "ctSize", "ctBg", "ctBgAlpha", "ctWho", "ctChar", "ctType", "currencyID", "ctBank", "buffIgnore", "resWhat", "resShow", "resTextPos", "resColor", "resDir", "resStyle" }
+local KEYS = { "class", "specs", "name", "hidden", "spellID", "healthEnabled", "healthOp", "healthPct", "enemyEnabled", "enemyOp", "enemyPct", "cdEnabled", "cdState", "chargesEnabled", "chargesState", "enemyAliveEnabled", "enemyAlive", "buffEnabled", "buffID", "buffState", "suppressEnabled", "suppressSeconds", "suppressReset", "uid", "trackerOf", "trackerCue", "kind", "trackShow", "barDrain", "barIcon", "barColor", "barTime", "barTimeOn", "barIconOn", "otherAuras", "crowdEnabled", "crowdOp", "crowdN", "crowdMetric", "group", "effect", "icon", "showWhenEnabled", "showRules", "lingerEnabled", "lingerSeconds", "layer", "availEnabled", "pos", "width", "height", "sizeLinked", "powerEnabled", "powerOp", "powerValue", "secEnabled", "secOp", "secValue", "buffAlways", "empowerFx", "soundEnabled", "soundKey", "soundVolume", "formEnabled", "formSpell", "tgtHostileEnabled", "tgtHostile", "tgtTypeEnabled", "tgtType", "tgtClassEnabled", "tgtClass", "threatEnabled", "threatState", "shape", "empowerLight", "itemID", "ctIcon", "ctName", "ctNum", "ctColor", "ctSize", "ctBg", "ctBgAlpha", "ctWho", "ctChar", "ctType", "currencyID", "ctBank", "buffIgnore", "resWhat", "resShow", "resTextPos", "resColor", "resDir", "resStyle", "keyText", "keyPos", "keySize", "keyColor" }
 
 local auras = {}        -- saved list (HeadsUpAurasDB.auras)
 local pool = {}         -- pool[i] = indicator for auras[i]
@@ -193,7 +193,11 @@ local function NewConfig()
         resStyle = "flat",       -- the look of the points of the second resource: circles "flat" / "ring" / "game" (the runes of the game),
                                  -- or (on a bar) "segmented" / "framed" (separate squares that fill as a rune recharges)
         ctBgAlpha = 20,          -- ... and how solid it is, in percent (0 = no box at all, 100 = solid): 20
-        layer = 3,        -- display priority 1..5 (3 = normal); higher is drawn on top
+        keyText = "",            -- a short text written on the icon (for example the key that casts the ability; see KeyText.lua) ...
+        keyPos = "topright",     -- ... where on the icon: "center", "top", "bottom", "topleft", "topright", "bottomleft" or "bottomright" ...
+        keySize = 14,            -- ... the size of the letters, in pixels ...
+        keyColor = { 1, 1, 1 },  -- ... and their colour
+        layer = 3,       -- display priority 1..5 (3 = normal); higher is drawn on top
         pos = nil,        -- { point, relPoint, x, y }
         width = 50,       -- the icon is width x height pixels ...
         height = 50,
@@ -223,6 +227,8 @@ local function CopyConfig(src)
             copy.ctColor = { src.ctColor[1], src.ctColor[2], src.ctColor[3] }
         elseif k == "ctBg" and src.ctBg then
             copy.ctBg = { src.ctBg[1], src.ctBg[2], src.ctBg[3] }
+        elseif k == "keyColor" and src.keyColor then
+            copy.keyColor = { src.keyColor[1], src.keyColor[2], src.keyColor[3] }
         elseif k == "specs" and src.specs then
             copy.specs = {}
             for id, on in pairs(src.specs) do copy.specs[id] = on end
@@ -2615,7 +2621,9 @@ local function ApplyConfig(ind)
     for _, face in ipairs(ind.faces) do
         face.GL:SetFrameStrata(EFFECT_STRATA[cfg.layer] or EFFECT_STRATA[3])
     end
-    ind.healthCurve = MakeHealthCurve(cfg.healthOp, cfg.healthPct / 100)
+    -- the text on the icon (KeyText.lua): only an icon has it (not a bar, a counter or a resource)
+    HeadsUpAuras_ApplyKeyText(ind, cfg, not isBar and not isCounter and not isResource, strata)
+    ind.healthCurve =MakeHealthCurve(cfg.healthOp, cfg.healthPct / 100)
     -- the opposite curves: another aura that waits for this one not to show uses them
     ind.healthInvCurve = MakeHealthCurve(cfg.healthOp, cfg.healthPct / 100, true)
     ind.enemyInvCurve = MakeHealthCurve(cfg.enemyOp, cfg.enemyPct / 100, true)
@@ -3000,7 +3008,7 @@ function HeadsUpAuras_IsDirty()
             for i = 1, #a do
                 if a[i].uid ~= b[i].uid or a[i].state ~= b[i].state then return true end
             end
-        elseif k == "barColor" or k == "ctColor" or k == "ctBg" or k == "resColor" then
+        elseif k == "barColor" or k == "ctColor" or k == "ctBg" or k == "resColor" or k == "keyColor" then
             local a, b = draft[k] or {}, saved[k] or {}
             for i = 1, 3 do
                 if a[i] ~= b[i] then return true end

@@ -1,3 +1,9 @@
+## HeadsUp Auras 1.4
+
+### New: Text on the icon
+
+- Write a short **Text** on the icon of an aura, for example the key that casts the ability (F1, Shift+3, Q...). Choose where it is written, its size and its color (*Appearance* step).
+
 ## HeadsUp Auras 1.2 beta
 
 ### New name: HeadsUp Auras

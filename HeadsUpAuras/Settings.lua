@@ -1627,6 +1627,10 @@ local function BuildAuraPage(page, tracker, part, counter, resource)
             shown = function(d) return d.shape ~= "bar" end,
             controls = { Choice("effect", EFFECT_LIST, "none") },
         }) end
+        -- a short text on the icon (KeyText.lua)
+        if not counter and not resource then
+            HeadsUpAuras_KeyTextFields(look, { Choice = Choice, Tip = Tip, HasAbility = HasAbility, WIDE_EXTRA = WIDE_EXTRA, SLOT_W = SLOT_W })
+        end
         if not tracker and not counter and not resource then
             look:Field({
                 label = "Empowered effect",
