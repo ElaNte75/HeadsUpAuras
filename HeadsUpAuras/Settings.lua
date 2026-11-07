@@ -25,11 +25,14 @@ local function GetAbilities()
                     and not info.isPassive and not info.isOffSpec
                     and info.spellID and not seen[info.spellID] then
                     seen[info.spellID] = true
-                    list[#list + 1] = { id = info.spellID, name = info.name, icon = info.iconID }
+                    local rank = type(info.subName) == "string" and tonumber(info.subName:match("(%d+)")) or nil
+                    list[#list + 1] = { id = info.spellID, name = info.name, icon = info.iconID, rank = rank }
                 end
             end
         end
     end
+    -- Forever only (ForeverRanks.lua): one entry per ability, whatever its ranks
+    if HeadsUpAuras_OneRankEach then list = HeadsUpAuras_OneRankEach(list) end
     table.sort(list, function(a, b) return a.name < b.name end)
     return list
 end
@@ -177,6 +180,11 @@ local EFFECT_LIST = {
     { value = "glow", text = "Glow" },
     { value = "pulse", text = "Pulse" },
 }
+-- a round icon has one more: Glow + pulse (the rim fades with the glow ring, and the icon breathes)
+local EFFECT_LIST_ROUND = {
+    EFFECT_LIST[1], EFFECT_LIST[2], EFFECT_LIST[3],
+    { value = "both", text = "Glow + pulse" },
+}
 -- the effect of an icon shown because its ability is empowered (there is always one chosen)
 local EMPOWER_FX_LIST = {
     { value = "auto", text = "Auto (by spec)" },
@@ -235,12 +243,23 @@ end
 
 -- Specializations: the specs of your class this aura belongs to. It only shows while you
 -- play one of the ticked ones. (specs = nil on an older aura means "every spec".)
+-- the specializations of the game: on some clients (e.g. Forever) the global functions are missing
+-- and only the C_SpecializationInfo table has them (or none at all: a character without a spec yet)
+local function SpecAPI()
+    local info = C_SpecializationInfo or {}
+    return (GetNumSpecializations or info.GetNumSpecializations),
+        (GetSpecialization or info.GetSpecialization),
+        (GetSpecializationInfo or info.GetSpecializationInfo)
+end
+
 local function ClassSpecs()
     local list = {}
-    local count = (GetNumSpecializations or C_SpecializationInfo.GetNumSpecializations)()
+    local countFn, _, infoFn = SpecAPI()
+    local count = countFn and countFn() or 0
+    if type(count) ~= "number" or issecretvalue(count) then count = 0 end
     for i = 1, count do
-        local id, name = GetSpecializationInfo(i)
-        if id then list[#list + 1] = { id = id, name = name } end
+        local id, name = infoFn and infoFn(i)
+        if id and not issecretvalue(id) then list[#list + 1] = { id = id, name = name } end
     end
     return list
 end
@@ -302,6 +321,10 @@ local function Choice(key, list, default, extra)
             for _, o in ipairs(Resolve(list, d)) do
                 items[#items + 1] = {
                     text = o.text,
+                    tip = o.tip and function(tt)   -- (an option can explain itself: o.tip)
+                        tt:AddLine(o.text, 1, 0.82, 0)
+                        tt:AddLine(o.tip, 1, 1, 1, true)
+                    end or nil,
                     selected = function() return get(d) == o.value end,
                     onClick = function()
                         d[key] = o.value
@@ -750,10 +773,15 @@ end
 local function KindAbilities(d)
     local all = GetAbilities()
     if (d.kind or "ability") ~= "tracker" then return all end
-    local list = {}
+    -- the abilities whose effect we know come first (with their duration); the rest follow,
+    -- so a client whose abilities are not in the data (e.g. Forever) still lists them all
+    local list, rest = {}, {}
     for _, a in ipairs(all) do
-        if KnownDuration(a.name) then list[#list + 1] = a end
+        if KnownDuration(a.name) then list[#list + 1] = a else rest[#rest + 1] = a end
     end
+    -- Forever only (ForeverRanks.lua): of the rest, only the abilities whose effect lasts
+    if HeadsUpAuras_TrackableOnly then rest = HeadsUpAuras_TrackableOnly(rest) end
+    for _, a in ipairs(rest) do list[#list + 1] = a end
     return list
 end
 
@@ -773,6 +801,12 @@ end
 -- a bar and an icon do not start with the same size: icons 50x50, a bar 200x16 (a custom size is kept)
 local function ApplyShapeSize(d, shape)
     local square = (d.width == d.height)
+    if shape ~= "round" and d.effect == "both" then d.effect = "pulse" end   -- ("Glow + pulse" exists only for a round icon)
+    if shape == "round" then   -- a circle has one size, the diameter
+        local m = math.max(d.width, d.height)
+        d.width, d.height, d.sizeLinked = m, m, true
+        return
+    end
     if shape == "bar" then
         if square then d.width, d.height, d.sizeLinked = 200, 16, false end
     elseif not square and d.width >= 150 then
@@ -782,6 +816,7 @@ end
 
 local function SetKind(d, kind)
     if (d.kind or "ability") == kind then return end
+    HeadsUpAuras_Log("ui", "kind=" .. tostring(kind))
     local wasCounter = (d.kind == "counter" or d.kind == "resource")
     d.kind = kind
     if kind == "resource" then
@@ -871,6 +906,7 @@ local function SelectAbility(d, a)
         d.name = HeadsUpAuras_UniqueName(a.name .. (KIND_SUFFIX[d.kind or "ability"] or ""), HeadsUpAuras_GetEditIndex())
     end
     d.spellID = a.id
+    HeadsUpAuras_Log("ui", "ability picked: " .. tostring(a.name) .. " id=" .. tostring(a.id) .. " kind=" .. tostring(d.kind))
     -- a condition that makes no sense for this ability is switched off
     local hasCost, hasCooldown, maxCharges = SpellFacts(a.id)
     if not (hasCost or hasCooldown) then d.availEnabled = false end
@@ -1185,7 +1221,10 @@ local function BuildAuraPage(page, tracker, part, counter, resource)
                                 local known = (d.kind == "tracker") and KnownDuration(a.name)
                                 items[#items + 1] = {
                                     text = known and (a.name .. " (" .. math.floor(known[1] + 0.5) .. " s)") or a.name, icon = a.icon,
-                                    selected = function() return d.spellID == a.id end,
+                                    selected = function()
+                                        return d.spellID == a.id
+                                            or (HeadsUpAuras_SameAbility ~= nil and HeadsUpAuras_SameAbility(d.spellID, a.id))
+                                    end,
                                     onClick = function() SelectAbility(d, a) end,
                                 }
                             end
@@ -1500,26 +1539,32 @@ local function BuildAuraPage(page, tracker, part, counter, resource)
         local PAIR_GAP = L.PAIR_GAP
         local BOX_W = SLOT_W   -- the right box is exactly as wide as a dropdown, so their edges line up
         local function dimension(key, other, unit, gap)
+            local isHeight = (key == "height")
             return {
-                type = "input", numeric = true, maxLetters = 3, unit = unit, w = BOX_W, gap = gap,
+                type = "input", numeric = true, maxLetters = 3, w = BOX_W, gap = gap,
+                -- a round icon has no width: its W box is grey and the last box is the diameter (shown as the Ø sign)
+                unit = (not isHeight) and unit or nil,
+                unitFn = isHeight and function(d) return d.shape == "round" and "\195\152" or unit end or nil,
+                when = (not isHeight) and function(d) return d.shape ~= "round" end or nil,
                 get = function(d) return d[key] end,
                 set = function(d, v)
                     local minimum = (key == "height" and d.shape == "bar") and 1 or 16
                     v = UI.Clamp(v, minimum, 256)
                     d[key] = v
                     if v < 16 then d.sizeLinked = false end
-                    if d.sizeLinked then d[other] = v end
+                    if d.sizeLinked or d.shape == "round" then d[other] = v end
                 end,
             }
         end
         look:Field({
             label = "Size",
             shown = function(d) return not (d.kind == "counter" and d.shape == "text") end,   -- (a text box is as big as its number)
-            tip = Tip("Size", "The width and the height of the icon, the bar or the box, in pixels (W and H).", "Click the = between them to set them separately. Grey for the Text of a counter: its box is as big as the number."),
+            tip = Tip("Size", "The width and the height of the icon, the bar or the box, in pixels (W and H).", "Click the = between them to set them separately. Grey for the Text of a counter: its box is as big as the number. A round icon has only a diameter (the last box, marked with the \195\152 sign): its width box is grey."),
             controls = {
                 dimension("width", "height", "W", LINK_PAD),
                 {
                     type = "link", textOn = "=", textOff = "x", w = L.CTRL_H, gap = LINK_PAD,   -- "=": linked, "x": separate
+                    when = function(d) return d.shape ~= "round" end,   -- (a circle: nothing to link)
                     active = function(d) return d.sizeLinked end,
                     onClick = function(d)
                         d.sizeLinked = not d.sizeLinked
@@ -1538,6 +1583,30 @@ local function BuildAuraPage(page, tracker, part, counter, resource)
                     end,
                 },
                 dimension("height", "width", "H", 0),
+            },
+        })
+
+        -- the rim of a round icon: how thick, and which colour (by default it follows the effect)
+        local function isRound(d) return d.shape == "round" and d.kind ~= "counter" and d.kind ~= "resource" end
+        look:Field({
+            label = "Rim thickness",
+            shown = isRound,
+            tip = Tip("Rim thickness", "How thick the rim around a round icon is: how far it spreads from the picture, like a burst: 1 a little, 3 a lot. It is strong next to the picture, fades outward and is not a perfect circle.", "Only for a round icon."),
+            controls = { Choice("rimThick", {
+                { value = 1, text = "1 (small)" }, { value = 2, text = "2 (medium)" }, { value = 3, text = "3 (wide)" } }, 3) },
+        })
+        look:Field({
+            label = "Rim color",
+            shown = isRound,
+            tip = Tip("Rim color", "Gold: the classic shiny gold rim. Follow the class: the color of the class (shaman blue, hunter green, warrior brown...). Custom: click the square to choose any color from a small palette.", "Only for a round icon. The glow around the icon has the same color."),
+            controls = {
+                Choice("rimMode", { { value = "gold", text = "Gold" }, { value = "class", text = "Follow the class" }, { value = "custom", text = "Custom" } }, "gold"),
+                {
+                    type = "color", w = UI.DropdownWidth(), gap = 0,
+                    when = function(d) return d.rimMode == "custom" end,
+                    get = function(d) return d.rimColor or { 1, 0.72, 0.2 } end,
+                    set = function(d, rgb) d.rimColor = rgb end,
+                },
             },
         })
 
@@ -1622,10 +1691,10 @@ local function BuildAuraPage(page, tracker, part, counter, resource)
         })
         look:Field({
             label = "Show effect",
-            tip = Tip("Show effect", "A ring around the icon, whenever the icon shows. It works on its own: the Empowered effect below is a separate thing and can be used together with it, or instead of it.", "None: nothing.  Glow: a pulsing ring.  Pulse: a pulsing ring, and the icon breathes."),
+            tip = Tip("Show effect", "A ring around the icon, whenever the icon shows. It works on its own: the Empowered effect below is a separate thing and can be used together with it, or instead of it.", "None: nothing.  Glow: a pulsing ring.  Pulse: a pulsing ring, and the icon breathes.  Round icon: Glow also fades the rim in and out with the ring; Pulse hides the rim and ring and only the icon breathes; Glow + pulse does all three."),
             usable = HasAbility,
             shown = function(d) return d.shape ~= "bar" end,
-            controls = { Choice("effect", EFFECT_LIST, "none") },
+            controls = { Choice("effect", function(d) return d.shape == "round" and EFFECT_LIST_ROUND or EFFECT_LIST end, "none") },
         }) end
         -- a short text on the icon (KeyText.lua)
         if not counter and not resource then
@@ -1827,9 +1896,62 @@ end
 local function BuildAfterCastCard(page)
     local afterCast = page:Card("After a cast")
     local hideTimer = Number("suppressSeconds", 1, 300, 10, "sec")
+    -- a weapon imbue (Forever): the addon reads the real time left from the game, so no timer is needed
+    local function isImbue(d) return d ~= nil and HeadsUpAuras_ImbueOwns ~= nil and HeadsUpAuras_ImbueOwns(d) and true or false end
+    -- a buff on you (Forever, BuffWatch.lua): the real buff is read from the game out of combat
+    local function isBuff(d) return d ~= nil and HeadsUpAuras_BuffOwns ~= nil and HeadsUpAuras_BuffOwns(d) and true or false end
+    local function followsImbue(d) return isImbue(d) or isBuff(d) end
+    hideTimer.when = function(d) return not followsImbue(d) end
+    local STACKS = {
+        { value = 0, text = "Off" },
+        { value = 1, text = "1 stack or fewer" },
+        { value = 2, text = "2 stacks or fewer" },
+        { value = 3, text = "3 stacks or fewer" },
+        { value = 4, text = "4 stacks or fewer" },
+        { value = 5, text = "5 stacks or fewer" },
+    }
+    -- a weapon imbue: the game tells the real time left, so instead of a timer you choose when the icon shows
+    local IMBUE_WARN = {
+        { value = 0, text = "when it is gone" },
+        { value = 15, text = "15 seconds before it ends" },
+        { value = 30, text = "30 seconds before it ends" },
+        { value = 60, text = "1 minute before it ends" },
+        { value = 120, text = "2 minutes before it ends" },
+        { value = 300, text = "5 minutes before it ends" },
+        { value = 600, text = "10 minutes before it ends" },
+    }
+    afterCast:Field({
+        label = "Show the icon",
+        shown = followsImbue,
+        usable = function(d) return HasAbility(d) and d.trackShow ~= "while" end,
+        tip = function(tt, d)
+            tt:AddLine("When the icon shows", 1, 0.82, 0)
+            if isBuff(d) then
+                tt:AddLine("The addon reads how long the buff lasts from the game. Choose when the icon should remind you: only when the buff is gone, or earlier, a while before it ends, so you can renew it in time.", 1, 1, 1, true)
+                tt:AddLine("In combat the game hides the buffs: there the addon counts the time from your cast. If the buff is lost early (hits, dispel), the icon shows when the fight ends.", 0.7, 0.7, 0.7, true)
+            else
+                tt:AddLine("The game tells the addon how long the weapon imbue lasts. Choose when the icon should remind you: only when the imbue is gone, or earlier, a while before it ends, so you can renew it in time.", 1, 1, 1, true)
+                tt:AddLine("It shows from that moment until the imbue is back on the weapon.", 0.7, 0.7, 0.7, true)
+            end
+        end,
+        controls = { Choice("imbueWarn", IMBUE_WARN, 0) },
+    })
+    afterCast:Field({
+        label = "Also show at",
+        shown = function(d) return isBuff(d) end,
+        usable = function(d) return HasAbility(d) and d.trackShow ~= "while" end,
+        tip = Tip("Few stacks left", "For a buff with stacks or charges (it loses one each time something happens, like a shield that loses a charge when you are hit): the icon shows also when the buff has this many stacks or fewer, so you renew it before it is gone.", "The game hides the buffs in combat, so the stacks are checked out of combat (the moment a fight ends, too)."),
+        controls = { Choice("buffStacks", STACKS, 0) },
+    })
     afterCast:Condition({
-        label = function(d) return d and d.trackerOf and "The effect lasts" or "After I cast it, hide for" end,
-        key = "suppressEnabled", usable = HasAbility,
+        shown = function(d) return not followsImbue(d) end,
+        label = function(d)
+            return d and d.trackerOf and "The effect lasts" or "After I cast it, hide for"
+        end,
+        get = function(d) return d.suppressEnabled end,
+        -- a tracker is only its timer: without it there is nothing to track, so it cannot be unticked
+        set = function(d, v) d.suppressEnabled = (d.kind == "tracker" or d.trackerOf ~= nil) and true or (v and true or false) end,
+        usable = HasAbility,
         tip = function(tt, d)
             if d and d.trackerOf then
                 tt:AddLine("How long the effect lasts", 1, 0.82, 0)
@@ -1845,13 +1967,24 @@ local function BuildAfterCastCard(page)
     })
     afterCast:Condition({
         label = "Start over on a new target", key = "suppressReset", indent = true,
+        shown = function(d) return not followsImbue(d) end,   -- (an imbue is on you, not on the target)
         usable = function(d) return HasAbility(d) and d.suppressEnabled and true or false end,
         tip = Tip("New target", "Each enemy has its own timer. When you change target, the timer of the new enemy is shown: none if you did not hit it yet (the effect is not on it), or the time that is left if you did. Going back to an enemy you hit before continues its timer.", "The addon recognizes an enemy by its id, which it can read in combat. The timers are forgotten when the fight ends."),
     })
     afterCast:Note({
         text = function(d)
+            if isBuff(d) then
+                return "The real time left of the buff is read from the game (out of combat): no timer to set."
+            end
+            if followsImbue(d) then
+                return "The real time left of the imbue is read from the game: no timer to set."
+            end
             if d and d.trackerOf then
                 return "The time is suggested from the game's data: correct it if it is not right for you."
+            end
+            -- Forever (BuffWatch.lua): a buff on you is learned the first time it is seen on you
+            if HeadsUpAuras_BuffOwns and d and d.kind == "tracker" then
+                return "A buff on you? Cast it once out of combat: the addon learns it and then follows the real buff (its time, its stacks). This box changes to show it."
             end
             return "The hide time is suggested from the game's data or the ability's description."
         end,
@@ -2064,7 +2197,9 @@ local function BuildTimerPage(page, withCue)
         label = "Show it",
         usable = HasAbility,
         tip = Tip("When the effect is shown", "While it lasts: it shows from the moment you cast the ability until the timer ends (a bar that empties). When it is gone: it shows after the timer ended, to remind you that the enemy lost the effect.", "A bar is usually shown while the effect lasts."),
-        controls = { Choice("trackShow", { { value = "while", text = "while it lasts" }, { value = "hide", text = "when it is gone" } }, "hide") },
+        controls = { Choice("trackShow", {
+            { value = "while", text = "while it lasts", tip = "The icon shows from the moment the effect starts until it is over (a bar that empties)." },
+            { value = "hide", text = "when it is gone", tip = "The icon shows when the effect is not there: it reminds you to cast the ability again." } }, "hide") },
     })
     if not withCue then return end
     local cue = page:Card("The ability")
@@ -2194,6 +2329,9 @@ local function BuildSituationPage(page, counter)
                 text = function(d) return SpecSummary(d) end,
                 items = function(d)
                     local items = {}
+                    if #ClassSpecs() == 0 then   -- (a low level character has no specialization yet: nothing to choose)
+                        return { { text = "All specs (no specialization yet)", disabled = true } }
+                    end
                     for _, spec in ipairs(ClassSpecs()) do
                         items[#items + 1] = {
                             text = spec.name, keepOpen = true,
@@ -2581,8 +2719,8 @@ local function UpdateChrome()
     end
     -- Save lights up only when something has changed (a new aura counts as changed once it has an ability)
     saveButton:SetOn(d ~= nil and d.spellID ~= nil and HeadsUpAuras_IsDirty())
-    -- Cancel works while an aura is being edited, or a new one has something in it
-    cancelButton:SetOn(d ~= nil and (HeadsUpAuras_GetEditIndex() ~= nil or HeadsUpAuras_IsDirty()))
+    -- Cancel works while an aura is open: it is the way out even when nothing was changed yet
+    cancelButton:SetOn(d ~= nil)
     -- a debuff tracker has its own two steps
     local wanted = "aura"
     if d and d.trackerOf then
@@ -2599,8 +2737,10 @@ local function UpdateChrome()
         LayoutTabs()
         SetStep(1)
     end
-    local specIndex = GetSpecialization()
-    local specName = specIndex and select(2, GetSpecializationInfo(specIndex)) or "?"
+    local _, specFn, infoFn = SpecAPI()
+    local specIndex = specFn and specFn()
+    local specName = "?"
+    if specIndex and infoFn then specName = select(2, infoFn(specIndex)) or "?" end
     whoText:SetText(UnitClass("player") .. " - " .. specName)
     UpdateNav()
 end
@@ -2619,12 +2759,16 @@ function SetStep(index)
 end
 
 UI.onChange = function()
-    HeadsUpAuras_ApplyDraft()
+    local ok, err = pcall(HeadsUpAuras_ApplyDraft)
+    if not ok then HeadsUpAuras_Log("ui", "ApplyDraft: " .. tostring(err)) end
     UI.SyncAll()
-    UpdateChrome()
+    local ok2, err2 = pcall(UpdateChrome)
+    if not ok2 then HeadsUpAuras_Log("ui", "UpdateChrome: " .. tostring(err2)) end
 end
 
 newButton:SetScript("OnClick", function()
+    if HeadsUpAuras_GetDraft() then return end   -- an aura is already open: Save or Cancel it first
+    HeadsUpAuras_Log("ui", "New clicked")
     UI.ClearFocus()
     HeadsUpAuras_ClearPreviews()
     HeadsUpAuras_BeginEdit(nil)   -- a blank new aura
@@ -2634,6 +2778,7 @@ newButton:SetScript("OnClick", function()
 end)
 
 cancelButton:SetScript("OnClick", function()
+    HeadsUpAuras_Log("ui", "Cancel clicked")
     UI.ClearFocus()
     picker:Hide()
     HeadsUpAuras_ClearPreviews()
@@ -2645,7 +2790,13 @@ end)
 
 saveButton:SetScript("OnClick", function()
     UI.ClearFocus()
-    if HeadsUpAuras_Save() then
+    local okS, saved = pcall(HeadsUpAuras_Save)
+    if not okS then HeadsUpAuras_Log("ui", "save error: " .. tostring(saved)) return end
+    if saved then
+        local d = HeadsUpAuras_GetDraft()
+        HeadsUpAuras_Log("ui", "aura saved: kind=" .. tostring(d and d.kind) .. " spell=" .. tostring(d and d.spellID)
+            .. " trackShow=" .. tostring(d and d.trackShow) .. " suppress=" .. tostring(d and d.suppressEnabled)
+            .. "/" .. tostring(d and d.suppressSeconds))
         print("|cffff8800HeadsUp Auras:|r aura saved")
         -- saving finishes the edit: unselect everything, nothing is open any more
         HeadsUpAuras_ClearPreviews()

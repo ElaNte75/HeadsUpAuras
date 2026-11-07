@@ -34,6 +34,21 @@ seterrorhandler(function(err)
     return previousHandler(err)
 end)
 
+-- Activity log: what the addon and the player do (loads, casts, clicks, saves, errors), kept in
+-- HeadsUpAurasDB.log — read from the SavedVariables file after /reload. Temporary debug aid.
+local pendingLog = {}
+function HeadsUpAuras_Log(tag, msg)
+    local entry = date("%Y-%m-%d %H:%M:%S  ") .. "[" .. tag .. "] " .. tostring(msg):sub(1, 300)
+    if HeadsUpAurasDB then
+        local list = HeadsUpAurasDB.log or {}
+        HeadsUpAurasDB.log = list
+        list[#list + 1] = entry
+        while #list > 400 do table.remove(list, 1) end
+    else
+        pendingLog[#pendingLog + 1] = entry
+    end
+end
+
 -- Display priority 1..5 = the frame strata used (3 = the usual one).
 local STRATA = { "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG" }
 -- The glow / pulse ring always sits one strata above its own icon.
@@ -41,7 +56,7 @@ local EFFECT_STRATA = { "LOW", "MEDIUM", "HIGH", "DIALOG", "FULLSCREEN" }
 -- How small the icon gets during "Pulse" (1 = not at all).
 local PULSE_SHRINK = 0.92
 
-local KEYS = { "class", "specs", "name", "hidden", "spellID", "healthEnabled", "healthOp", "healthPct", "enemyEnabled", "enemyOp", "enemyPct", "cdEnabled", "cdState", "chargesEnabled", "chargesState", "enemyAliveEnabled", "enemyAlive", "buffEnabled", "buffID", "buffState", "suppressEnabled", "suppressSeconds", "suppressReset", "uid", "trackerOf", "trackerCue", "kind", "trackShow", "barDrain", "barIcon", "barColor", "barTime", "barTimeOn", "barIconOn", "otherAuras", "crowdEnabled", "crowdOp", "crowdN", "crowdMetric", "group", "effect", "icon", "showWhenEnabled", "showRules", "lingerEnabled", "lingerSeconds", "layer", "availEnabled", "pos", "width", "height", "sizeLinked", "powerEnabled", "powerOp", "powerValue", "secEnabled", "secOp", "secValue", "buffAlways", "empowerFx", "soundEnabled", "soundKey", "soundVolume", "formEnabled", "formSpell", "tgtHostileEnabled", "tgtHostile", "tgtTypeEnabled", "tgtType", "tgtClassEnabled", "tgtClass", "threatEnabled", "threatState", "shape", "empowerLight", "itemID", "ctIcon", "ctName", "ctNum", "ctColor", "ctSize", "ctBg", "ctBgAlpha", "ctWho", "ctChar", "ctType", "currencyID", "ctBank", "buffIgnore", "resWhat", "resShow", "resTextPos", "resColor", "resDir", "resStyle", "keyText", "keyPos", "keySize", "keyColor" }
+local KEYS = { "class", "specs", "name", "hidden", "spellID", "healthEnabled", "healthOp", "healthPct", "enemyEnabled", "enemyOp", "enemyPct", "cdEnabled", "cdState", "chargesEnabled", "chargesState", "enemyAliveEnabled", "enemyAlive", "buffEnabled", "buffID", "buffState", "suppressEnabled", "suppressSeconds", "suppressReset", "uid", "trackerOf", "trackerCue", "kind", "trackShow", "barDrain", "barIcon", "barColor", "barTime", "barTimeOn", "barIconOn", "otherAuras", "crowdEnabled", "crowdOp", "crowdN", "crowdMetric", "group", "effect", "icon", "showWhenEnabled", "showRules", "lingerEnabled", "lingerSeconds", "layer", "availEnabled", "pos", "width", "height", "sizeLinked", "powerEnabled", "powerOp", "powerValue", "secEnabled", "secOp", "secValue", "buffAlways", "empowerFx", "soundEnabled", "soundKey", "soundVolume", "formEnabled", "formSpell", "tgtHostileEnabled", "tgtHostile", "tgtTypeEnabled", "tgtType", "tgtClassEnabled", "tgtClass", "threatEnabled", "threatState", "shape", "rimThick", "rimMode", "rimColor", "imbueWarn","empowerLight", "itemID", "ctIcon", "ctName", "ctNum", "ctColor", "ctSize", "ctBg", "ctBgAlpha", "ctWho", "ctChar", "ctType", "currencyID", "ctBank", "buffIgnore", "resWhat", "resShow", "resTextPos", "resColor", "resDir", "resStyle", "keyText", "keyPos", "keySize", "keyColor" }
 
 local auras = {}        -- saved list (HeadsUpAurasDB.auras)
 local pool = {}         -- pool[i] = indicator for auras[i]
@@ -49,8 +64,13 @@ local newInd            -- indicator used for a draft that is not saved yet
 local draft, editIndex, editInd
 local currentSpec     -- id of the specialization being played (Blood, Frost, ...)
 local function RefreshCurrentSpec()
-    local index = GetSpecialization()
-    currentSpec = index and (GetSpecializationInfo(index)) or nil
+    local info = C_SpecializationInfo or {}
+    local specFn = GetSpecialization or info.GetSpecialization
+    local infoFn = GetSpecializationInfo or info.GetSpecializationInfo
+    local ok, index = specFn and pcall(specFn)
+    index = (ok and not issecretvalue(index)) and index or nil
+    local ok2, id = index and infoFn and pcall(infoFn, index)
+    currentSpec = (ok2 and not issecretvalue(id)) and id or nil
 end
 
 -- The sounds for "Play a sound when it shows". file = our own sounds (HeadsUpAuras/Sounds, made by
@@ -133,6 +153,11 @@ local function NewConfig()
         tgtClass = { boss = true, rare = true },
         empowerLight = "on",       -- the soft light of a themed Empowered effect: "on" or "off" (the Show effect ring is separate)
         shape = "square",          -- the icon is a "square" or "round" (a circle with a rim, made to match the effect)
+        imbueWarn = 0,             -- a weapon imbue / a buff on you (Forever): show the icon this many seconds before it ends (0 = when it is gone)
+        buffStacks = 0,            -- a buff on you with stacks (Forever, BuffWatch.lua): show also at this many stacks or fewer (0 = off)
+        rimThick = 3,              -- the rim of a round icon: 1 thin, 2 medium, 3 thick (the original one)
+        rimMode = "gold",          -- "gold" (classic), "class" (the colour of the class) or "custom" (rimColor)
+        rimColor = nil,            -- { r, g, b } of a custom rim
         threatEnabled = false,     -- the target is attacking me (has aggro on me) ...
         threatState = "yes",       -- ... "yes" or "no"
         -- "Buff" (e.g. Dark Succor): the ability is lit up by it. The game hides buffs in combat
@@ -227,6 +252,8 @@ local function CopyConfig(src)
             copy.ctColor = { src.ctColor[1], src.ctColor[2], src.ctColor[3] }
         elseif k == "ctBg" and src.ctBg then
             copy.ctBg = { src.ctBg[1], src.ctBg[2], src.ctBg[3] }
+        elseif k == "rimColor" and src.rimColor then
+            copy.rimColor = { src.rimColor[1], src.rimColor[2], src.rimColor[3] }
         elseif k == "keyColor" and src.keyColor then
             copy.keyColor = { src.keyColor[1], src.keyColor[2], src.keyColor[3] }
         elseif k == "specs" and src.specs then
@@ -419,6 +446,75 @@ local FX_MASK, FX_RINGGLOW = FX_DIR .. "mask.tga", FX_DIR .. "ringglow.tga"
 -- the rim of a round icon follows the effect (gold for the classic ones)
 local RIM_BY_STYLE = { frost = FX_DIR .. "rim_frost.tga", blood = FX_DIR .. "rim_blood.tga", poison = FX_DIR .. "rim_poison.tga" }
 local RIM_GOLD = FX_DIR .. "rim_gold.tga"
+-- The icon "breathes": it shrinks over 0.5 s and grows back over 0.5 s, as two separate steps that repeat. (One
+-- animation that bounced back and forth jumped back to full size at the end of the shrinking.)
+-- A picture is normally snapped to the pixel grid, so when it grows or shrinks by only a few pixels it moves in
+-- coarse steps (it seems to stop and jump). Switched off for the icon so that the breathing is smooth.
+local function NoSnap(region)
+    if region.SetSnapToPixelGrid then region:SetSnapToPixelGrid(false) end
+    if region.SetTexelSnappingBias then region:SetTexelSnappingBias(0) end
+end
+
+local function MakeBreath(frame)
+    -- (the game's own Scale animation jumped back to full size, so the size is set by hand, every frame, along a sine:
+    -- 1 -> PULSE_SHRINK -> 1 in one second. The frame is kept in the middle of its parent while it breathes.)
+    local parent = frame:GetParent()
+    local breath = { playing = false }
+    local t = 0
+    local function step(_, dt)
+        t = (t + dt) % 1
+        local s = 1 - (1 - PULSE_SHRINK) * (0.5 - 0.5 * math.cos(t * 2 * math.pi))
+        local w, h = parent:GetSize()
+        if w and h and w > 0 then
+            frame:ClearAllPoints()
+            frame:SetPoint("CENTER", parent, "CENTER")
+            frame:SetSize(w * s, h * s)
+        end
+    end
+    function breath:Play()
+        if self.playing then return end
+        self.playing = true
+        t = 0
+        frame:SetScript("OnUpdate", step)
+    end
+    function breath:Stop()
+        if not self.playing then return end
+        self.playing = false
+        frame:SetScript("OnUpdate", nil)
+        frame:ClearAllPoints()
+        frame:SetAllPoints(parent)
+    end
+    function breath:IsPlaying() return self.playing end
+    function breath:GetAnimations() return nil end   -- (not a game animation any more)
+    return breath
+end
+
+-- the rim of a round icon fades out and in, in the rhythm of the glow ring (both bounce over 0.5 s)
+local function MakeRimPulse(rim)
+    local group = rim:CreateAnimationGroup()
+    group:SetLooping("BOUNCE")
+    local fade = group:CreateAnimation("Alpha")
+    fade:SetFromAlpha(1)
+    fade:SetToAlpha(0)
+    fade:SetDuration(0.5)
+    fade:SetSmoothing("IN_OUT")
+    return group
+end
+-- The colour of the rim of a round icon: "class" = the colour of the class of the aura, "custom" = the chosen one,
+-- anything else (gold, the default; "auto" of older versions) = nil, which means the classic gold.
+local function RimTint(cfg)
+    if cfg.rimMode == "custom" and cfg.rimColor then return cfg.rimColor end
+    if cfg.rimMode == "class" then
+        local cc = RAID_CLASS_COLORS and RAID_CLASS_COLORS[cfg.class or playerClass]
+        if cc then return { cc.r, cc.g, cc.b } end
+    end
+    return nil
+end
+-- the size of the aura (Media/fx/aura_1-3.tga) around a round icon, in icon diameters, by rim thickness
+local AURA_SIZE = { [1] = 1.5, [2] = 1.85, [3] = 2.25 }
+-- the size of the rim picture (Media/fx/rim_w1-3.tga), in icon diameters, by thickness: the bigger, the further the burst spreads
+local RIM_SIZE = { [1] = 1.4, [2] = 1.7, [3] = 2.0 }
+local RIM_TINT = { gold = { 1, 0.72, 0.2 }, frost = { 0.45, 0.75, 1 }, blood = { 0.85, 0.12, 0.12 }, poison = { 0.45, 0.9, 0.25 } }
 
 -- The theme of the "Auto" effect: by the specialization (ids). Unlisted specs use the sunburst.
 local SPEC_FX = {
@@ -911,6 +1007,7 @@ local function MakeExtraFace(parent)
     local mask = I2:CreateMaskTexture()
     mask:SetTexture(FX_MASK, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
     mask:SetAllPoints(I2)
+    NoSnap(tex); NoSnap(mask)
     local cd = CreateFrame("Cooldown", nil, I2, "CooldownFrameTemplate")
     cd:SetAllPoints(I2)
     local RIM = CreateFrame("Frame", nil, B2)   -- the rim of a round icon, above the picture
@@ -934,19 +1031,9 @@ local function MakeExtraFace(parent)
     fade:SetToAlpha(0.25)
     fade:SetDuration(0.5)
     fade:SetSmoothing("IN_OUT")
-    local iconPulse = I2:CreateAnimationGroup()
-    iconPulse:SetLooping("BOUNCE")
-    local squeeze = iconPulse:CreateAnimation("Scale")
-    if squeeze.SetScaleFrom then
-        squeeze:SetScaleFrom(1, 1)
-        squeeze:SetScaleTo(PULSE_SHRINK, PULSE_SHRINK)
-    else
-        squeeze:SetScale(PULSE_SHRINK, PULSE_SHRINK)
-    end
-    squeeze:SetDuration(0.5)
-    squeeze:SetSmoothing("IN_OUT")
+    local iconPulse = MakeBreath(I2)
     return { B = B2, I = I2, tex = tex, cd = cd, GL = GL, glow = glow, pulse = pulse, iconPulse = iconPulse,
-        fx = MakeFx(B2), mask = mask, RIM = RIM, rim = rim }
+        fx = MakeFx(B2), mask = mask, RIM = RIM, rim = rim, rimPulse = MakeRimPulse(rim) }
 end
 
 local function CreateIndicator()
@@ -1021,6 +1108,7 @@ local function CreateIndicator()
     local mask = I:CreateMaskTexture()
     mask:SetTexture(FX_MASK, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
     mask:SetAllPoints(I)
+    NoSnap(tex); NoSnap(mask)
     local cd = CreateFrame("Cooldown", nil, I, "CooldownFrameTemplate")
     cd:SetAllPoints(I)
     local RIM = CreateFrame("Frame", nil, B)   -- the rim of a round icon, above the picture
@@ -1053,17 +1141,7 @@ local function CreateIndicator()
     ind.glow, ind.pulse = glow, pulse
 
     -- Pulse: the icon shrinks and grows in the same rhythm as the glow (both bounce over 0.5 s)
-    local iconPulse = I:CreateAnimationGroup()
-    iconPulse:SetLooping("BOUNCE")
-    local squeeze = iconPulse:CreateAnimation("Scale")
-    if squeeze.SetScaleFrom then
-        squeeze:SetScaleFrom(1, 1)
-        squeeze:SetScaleTo(PULSE_SHRINK, PULSE_SHRINK)
-    else
-        squeeze:SetScale(PULSE_SHRINK, PULSE_SHRINK)
-    end
-    squeeze:SetDuration(0.5)
-    squeeze:SetSmoothing("IN_OUT")
+    local iconPulse = MakeBreath(I)
     ind.iconPulse = iconPulse
 
     -- R: the second path ("always show when empowered"). Not a child of A, so the conditions
@@ -1074,7 +1152,7 @@ local function CreateIndicator()
     ind.R = R
     ind.faces = {
         { B = B, I = I, tex = tex, cd = cd, GL = GL, glow = glow, pulse = pulse, iconPulse = iconPulse,
-            fx = MakeFx(B), mask = mask, RIM = RIM, rim = rim },
+            fx = MakeFx(B), mask = mask, RIM = RIM, rim = rim, rimPulse = MakeRimPulse(rim) },
         MakeExtraFace(R),
     }
 
@@ -1770,6 +1848,7 @@ local function UpdateVisual(ind)
                 face.glow:Hide()
                 face.pulse:Stop()
                 face.iconPulse:Stop()
+                face.rimPulse:Stop()
             end
         else
             SetFx(ind.faces[1], cfg.buffEnabled and cfg.buffState ~= "gone" and true or false)
@@ -2525,10 +2604,17 @@ local function ApplyConfig(ind)
             face.tex:AddMaskTexture(face.mask)
             face.cd:SetUseCircularEdge(true)
             face.cd:SetSwipeTexture(FX_MASK)
-            face.rim:SetTexture(RIM_BY_STYLE[fxStyle] or RIM_GOLD)
-            face.rim:SetSize(big * 1.3, big * 1.3)
+            local thick = cfg.rimThick or 3
+            -- a white ring (1 thin line, 2 medium, 3 a soft misty haze that fades outward), painted with the
+            -- chosen colour (gold if none)
+            face.rim:SetTexture(FX_DIR .. "rim_w" .. thick .. ".tga")
+            local c = RimTint(cfg) or RIM_TINT.gold
+            face.rim:SetVertexColor(c[1], c[2], c[3])
+            local rimSize = RIM_SIZE[thick] or RIM_SIZE[3]
+            face.rim:SetSize(big * rimSize, big * rimSize)
             face.rim:Show()
-            face.glow:SetTexture(FX_RINGGLOW)
+            -- an aura: strong against the rim, fading outward, a little uneven; as far-reaching as the rim is thick
+            face.glow:SetTexture(FX_DIR .. "aura_" .. (cfg.rimThick or 3) .. ".tga")
         else
             face.tex:RemoveMaskTexture(face.mask)
             face.cd:SetUseCircularEdge(false)
@@ -2537,27 +2623,53 @@ local function ApplyConfig(ind)
             face.glow:SetTexture(FX_RING)
         end
         -- glow ring (the artwork of the square one is about 1.75x the size of the icon it surrounds)
-        local ringSize = round and 1.5 or 1.75
+        local ringSize = round and (AURA_SIZE[cfg.rimThick or 3] or AURA_SIZE[3]) or 1.75
         face.glow:SetSize(big * ringSize, big * ringSize)
+        -- the glowing ring follows the colour chosen for the rim of a round icon (else the usual gold)
+        local rimTint = round and RimTint(cfg)
+        if rimTint then face.glow:SetVertexColor(rimTint[1], rimTint[2], rimTint[3], 1)
+        else face.glow:SetVertexColor(1, 0.85, 0.3, 1) end
+        -- Effects: "glow" (a pulsing ring), "pulse" (the icon breathes), "both" (round icon only: ring and breathing).
+        -- A square icon keeps the old way: Pulse = ring + breathing.
+        -- On a round icon the rim fades in and out with the ring (Glow, Both) and is gone while the icon only
+        -- breathes (Pulse), so that the rim and the breathing do not fight.
+        local ringOn = effect == "glow" or effect == "both" or (effect == "pulse" and not round)
+        local breathe = effect == "pulse" or effect == "both"
+        local rimFades = round and (effect == "glow" or effect == "both")
         if effect == "none" then
             face.pulse:Stop()
             face.iconPulse:Stop()
+            face.rimPulse:Stop()
             face.glow:Hide()
         else
-            face.glow:Show()
             if ind.effectApplied ~= effect then
-                -- effect changed: restart both animations together so they stay in step
+                -- effect changed: restart all animations together so they stay in step
                 face.pulse:Stop()
                 face.iconPulse:Stop()
+                face.rimPulse:Stop()
             end
-            if not face.pulse:IsPlaying() then face.pulse:Play() end
-            if effect == "pulse" then
+            if ringOn then
+                face.glow:Show()
+                if not face.pulse:IsPlaying() then face.pulse:Play() end
+            else
+                face.glow:Hide()
+                face.pulse:Stop()
+            end
+            if breathe then
                 if not face.iconPulse:IsPlaying() then face.iconPulse:Play() end
             else
                 face.iconPulse:Stop()
             end
+            if rimFades then
+                if not face.rimPulse:IsPlaying() then face.rimPulse:Play() end
+            else
+                face.rimPulse:Stop()
+            end
+            if round and effect == "pulse" then face.rim:Hide() end
         end
-        face.GL:SetFrameStrata(EFFECT_STRATA[cfg.layer] or EFFECT_STRATA[3])
+        -- the glow stays in the strata of its icon (a higher frame level keeps it in front of the icon): one strata
+        -- above put it over the world map and other windows that should cover the icon
+        face.GL:SetFrameStrata(STRATA[cfg.layer] or STRATA[3]); face.GL:SetFrameLevel(face.B:GetFrameLevel() + 20)
     end
     ind.effectApplied = effect
     -- a progress bar replaces the picture; no rim, ring or pulse around it
@@ -2575,6 +2687,7 @@ local function ApplyConfig(ind)
             face.glow:Hide()
             face.pulse:Stop()
             face.iconPulse:Stop()
+            face.rimPulse:Stop()
         end
     end
     ApplyBar(ind, cfg, width, height)
@@ -2619,7 +2732,9 @@ local function ApplyConfig(ind)
     -- display priority: a higher layer is drawn above the lower ones
     for _, part in ipairs(ind.parts) do part:SetFrameStrata(strata) end
     for _, face in ipairs(ind.faces) do
-        face.GL:SetFrameStrata(EFFECT_STRATA[cfg.layer] or EFFECT_STRATA[3])
+        -- the glow stays in the strata of its icon (a higher frame level keeps it in front of the icon): one strata
+        -- above put it over the world map and other windows that should cover the icon
+        face.GL:SetFrameStrata(STRATA[cfg.layer] or STRATA[3]); face.GL:SetFrameLevel(face.B:GetFrameLevel() + 20)
     end
     -- the text on the icon (KeyText.lua): only an icon has it (not a bar, a counter or a resource)
     HeadsUpAuras_ApplyKeyText(ind, cfg, not isBar and not isCounter and not isResource, strata)
@@ -2706,6 +2821,9 @@ local function ForEachIndicator(fn)
     for _, ind in pairs(pool) do fn(ind) end
     if newInd then fn(newInd) end
 end
+-- for add-on modules (ImbueWatch.lua)
+function HeadsUpAuras_EachIndicator(fn) ForEachIndicator(fn) end
+function HeadsUpAuras_RefreshAll() ForEachIndicator(Update) end
 
 ---------------------------------------------------------------------------
 -- API used by the settings window
@@ -3628,6 +3746,7 @@ end
 -- Write the draft into the saved list. Returns the aura's index, or nil if no ability yet.
 function HeadsUpAuras_Save()
     if not draft or not draft.spellID then return nil end
+    if draft.kind == "tracker" or draft.trackerOf then draft.suppressEnabled = true end   -- a tracker needs its timer
     draft.name = UniqueName(draft.name or SpellName(draft.spellID) or "Aura", editIndex)
     draft.uid = draft.uid or NewUid()
     if editIndex then
@@ -3691,7 +3810,7 @@ local function OnEvent(_, event, arg1, arg2, arg3)
             -- the journal of the targets is cleared with the fight
             if ind.targetTimers then
                 ind.targetTimers = nil
-                if c and c.suppressEnabled and c.suppressReset then ind.suppressUntil = nil end
+                if c and c.suppressEnabled and c.suppressReset and not (HeadsUpAuras_ImbueOwns and HeadsUpAuras_ImbueOwns(c)) and not (HeadsUpAuras_BuffOwns and HeadsUpAuras_BuffOwns(c)) then ind.suppressUntil = nil end
             end
         end)
     end
@@ -3702,7 +3821,7 @@ local function OnEvent(_, event, arg1, arg2, arg3)
         local now = GetTime()
         ForEachIndicator(function(ind)
             local c = ind.cfg
-            if c and c.suppressEnabled and c.suppressReset then
+            if c and c.suppressEnabled and c.suppressReset and not (HeadsUpAuras_ImbueOwns and HeadsUpAuras_ImbueOwns(c)) and not (HeadsUpAuras_BuffOwns and HeadsUpAuras_BuffOwns(c)) then
                 local expires = guid and ind.targetTimers and ind.targetTimers[guid]
                 ind.suppressUntil = (expires and expires > now) and expires or nil
             end
@@ -3711,6 +3830,7 @@ local function OnEvent(_, event, arg1, arg2, arg3)
     if event == "UNIT_SPELLCAST_SUCCEEDED" then
         -- arg3 = the spell the player just cast. Start the hide-timer of every aura for it.
         local spellID = arg3
+        HeadsUpAuras_Log("cast", "id=" .. tostring(spellID) .. (issecretvalue(spellID) and " (SECRET)" or ""))
         if spellID and not issecretvalue(spellID) then
             local now = GetTime()
             local started = false
@@ -3718,7 +3838,9 @@ local function OnEvent(_, event, arg1, arg2, arg3)
             local castName = SpellNameOf(spellID)
             ForEachIndicator(function(ind)
                 local c = ind.cfg
-                if c and c.suppressEnabled and (c.spellID == spellID or AlsoStartedBy(c, castName)) then
+                -- (Forever: any rank of the ability counts, see ForeverRanks.lua; on retail that function does not exist)
+                if c and c.suppressEnabled and (c.spellID == spellID or AlsoStartedBy(c, castName)
+                    or (HeadsUpAuras_SameAbilityName ~= nil and c.spellID and HeadsUpAuras_SameAbilityName(c.spellID, castName))) then
                     local expires = now + (c.suppressSeconds or 10)
                     ind.suppressUntil = expires
                     if c.suppressReset and guid then
@@ -3734,14 +3856,17 @@ local function OnEvent(_, event, arg1, arg2, arg3)
                 end
             end)
             -- (the auras that look at a timer of another aura change too, so all are updated)
+            HeadsUpAuras_Log("cast", "name=" .. tostring(castName) .. " matched=" .. tostring(started))
             if started then ForEachIndicator(Update) end
         end
         return
     end
     if event == "ADDON_LOADED" then
         if arg1 ~= "HeadsUpAuras" then return end
-        playerClass = select(2, UnitClass("player"))
-        inCombat = UnitAffectingCombat("player") and true or false
+        local okClass, _, classToken = pcall(UnitClass, "player")
+        playerClass = (okClass and not issecretvalue(classToken)) and classToken or nil
+        local okCombat, fighting = pcall(UnitAffectingCombat, "player")
+        inCombat = (okCombat and not issecretvalue(fighting) and fighting) and true or false
         RefreshCurrentSpec()
         HeadsUpAurasDB = HeadsUpAurasDB or {}
         for _, e in ipairs(pendingErrors) do
@@ -3749,6 +3874,11 @@ local function OnEvent(_, event, arg1, arg2, arg3)
             table.insert(HeadsUpAurasDB.errors, e)
         end
         pendingErrors = {}
+        for _, e in ipairs(pendingLog) do
+            HeadsUpAurasDB.log = HeadsUpAurasDB.log or {}
+            table.insert(HeadsUpAurasDB.log, e)
+        end
+        pendingLog = {}
         if not HeadsUpAurasDB.auras then
             HeadsUpAurasDB.auras = {}
             -- migrate the old single-aura format
@@ -3778,6 +3908,7 @@ local function OnEvent(_, event, arg1, arg2, arg3)
             if a.effect == nil then
                 a.effect = a.glow and "glow" or "none"
             end
+            if a.rimMode == "auto" then a.rimMode = "gold" end   -- "follows the effect" was replaced by gold
             if a.showRules == nil then
                 if a.showWhen == "out" then
                     a.showRules = { out = true }
@@ -3837,6 +3968,7 @@ local function OnEvent(_, event, arg1, arg2, arg3)
             a.uid = a.uid or NewUid()
             a.links = nil   -- (an older way to link auras: no longer used)
             if a.kind == "buff" or a.kind == "debuff" then a.kind = "tracker" end
+            if a.kind == "tracker" or a.trackerOf then a.suppressEnabled = true end   -- a tracker needs its timer
             -- "None" used to be a choice of the bar's time and icon: now a tick box each
             if a.barTime == "none" then a.barTimeOn, a.barTime = false, "right" end
             if a.barIcon == "none" then a.barIconOn, a.barIcon = false, "left" end   -- one kind: the side comes from the ability
@@ -3846,10 +3978,12 @@ local function OnEvent(_, event, arg1, arg2, arg3)
         end
         HeadsUpAuras_PruneGroups()
         HeadsUpAurasDB.glowChoice = true   -- the migration above is done
+        HeadsUpAuras_Log("load", "class=" .. tostring(playerClass) .. " spec=" .. tostring(currentSpec) .. " auras=" .. tostring(auras and #auras))
         return
     end
     if event == "PLAYER_ENTERING_WORLD" then
-        inCombat = UnitAffectingCombat("player") and true or false
+        local okCombat, fighting = pcall(UnitAffectingCombat, "player")
+        inCombat = (okCombat and not issecretvalue(fighting) and fighting) and true or false
         RefreshCurrentSpec()   -- the spec may not be known yet when the addon file loads
     elseif event == "PLAYER_SPECIALIZATION_CHANGED" then
         RefreshCurrentSpec()

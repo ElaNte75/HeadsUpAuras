@@ -367,6 +367,11 @@ local function buildPopup()
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                 self.item.tip(GameTooltip)
                 GameTooltip:Show()
+            elseif self.item and (self.text:GetStringWidth() or 0) > (self.text:GetWidth() or 0) + 0.5 then
+                -- the text of the item is cut short: the tooltip says it in full
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:AddLine(self.item.text or "", 1, 1, 1, true)
+                GameTooltip:Show()
             end
         end)
         r:SetScript("OnLeave", function(self)
@@ -562,7 +567,10 @@ local allCards = {}
 
 function UI.SyncAll()
     local d = HeadsUpAuras_GetDraft()
-    for _, w in ipairs(registry) do w.Sync(d) end
+    for i, w in ipairs(registry) do
+        local ok, err = pcall(w.Sync, d)
+        if not ok then HeadsUpAuras_Log("ui", "SyncAll #" .. i .. ": " .. tostring(err)) end
+    end
     -- a row that is not shown (def.shown(d) is false) takes no room: the rows under it move up
     for _, card in ipairs(allCards) do
         if card.dirty then card:Relayout() end
@@ -621,7 +629,7 @@ local function MakeControl(card, def, x, y, w)
     elseif kind == "input" then
         local function current(d) return tostring(def.get(d) or "") end
         f = UI.Input(card, w, {
-            numeric = def.numeric, maxLetters = def.maxLetters, unit = def.unit,
+            numeric = def.numeric, maxLetters = def.maxLetters, unit = def.unit or (def.unitFn and "H"),
             commit = function(eb)
                 if not UI.IsOpen() then return end
                 local d = HeadsUpAuras_GetDraft()
@@ -642,6 +650,7 @@ local function MakeControl(card, def, x, y, w)
         })
         function c.Sync(d, on)
             if d and not f.edit:HasFocus() then f.edit:SetText(current(d)) end
+            if d and def.unitFn and f.unit then f.unit:SetText(def.unitFn(d)) end   -- (a unit that changes with the draft)
             f:SetOn(on)
         end
         -- an item can be dropped on the box (dragged from the bags): def.onItemDrop(d, itemID)
@@ -790,6 +799,11 @@ local function MakeControl(card, def, x, y, w)
         end
     else
         error("HeadsUp Auras UI: unknown control type " .. tostring(kind))
+    end
+    -- def.when(d): this control works only while it is true (the others of the row keep working)
+    if def.when then
+        local inner = c.Sync
+        c.Sync = function(d, on) inner(d, on and (d == nil or def.when(d)) and true or false) end
     end
     f:SetPoint("TOPLEFT", card, "TOPLEFT", x, -y)
     -- (a number box shows its tooltip from the box inside it: the frame around it has no mouse)
