@@ -154,7 +154,8 @@ local function NewConfig()
         empowerLight = "on",       -- the soft light of a themed Empowered effect: "on" or "off" (the Show effect ring is separate)
         shape = "square",          -- the icon is a "square" or "round" (a circle with a rim, made to match the effect)
         imbueWarn = 0,             -- a weapon imbue / a buff on you (Forever): show the icon this many seconds before it ends (0 = when it is gone)
-        buffStacks = 0,            -- a buff on you with stacks (Forever, BuffWatch.lua): show also at this many stacks or fewer (0 = off)
+        hideDead = true,           -- hidden while you are dead or a ghost (corpse run)
+        buffStacks = 0,           -- a buff on you with stacks (Forever, BuffWatch.lua): show also at this many stacks or fewer (0 = off)
         rimThick = 3,              -- the rim of a round icon: 1 thin, 2 medium, 3 thick (the original one)
         rimMode = "gold",          -- "gold" (classic), "class" (the colour of the class) or "custom" (rimColor)
         rimColor = nil,            -- { r, g, b } of a custom rim
@@ -1358,6 +1359,11 @@ end
 -- Inside each pair, ticking only one restricts to it; ticking both or neither means "either".
 -- The three pairs combine with AND. "always" ticked = no restriction at all.
 local function ShowRulesAllow(cfg, ind)
+    -- "Hide while I am dead" (on unless unticked, old auras too): dead or a ghost (corpse run) -> nothing to press
+    if cfg.hideDead ~= false then
+        local ok, dead = pcall(UnitIsDeadOrGhost, "player")
+        if ok and not issecretvalue(dead) and dead then return false end
+    end
     local rules = cfg.showRules
     if not cfg.showWhenEnabled or not rules then return true end
     if rules.always then return true end   -- "Always" ticked: no restriction at all
@@ -4027,6 +4033,8 @@ driver:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 driver:RegisterEvent("CURRENCY_DISPLAY_UPDATE")     -- a currency changed: the counters are written again
 driver:RegisterEvent("BAG_UPDATE_DELAYED")        -- the bags changed: the counters are written again
 driver:RegisterEvent("ITEM_DATA_LOAD_RESULT")     -- the name of an item has arrived
+-- you died / you are alive again (released, resurrected): "Hide while I am dead"
+for _, e in ipairs({ "PLAYER_DEAD", "PLAYER_ALIVE", "PLAYER_UNGHOST" }) do pcall(driver.RegisterEvent, driver, e) end
 driver:SetScript("OnEvent", OnEvent)
 
 -- A cooldown running out fires no event, so auras with a cooldown condition are

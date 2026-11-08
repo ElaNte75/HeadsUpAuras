@@ -111,6 +111,11 @@ UNIT_AURA, τέλος μάχης, login) → διόρθωση από το πρα
 Επιβεβαιώθηκε: μετά το πρώτο cast εκτός μάχης ο tracker LS δείχνει τις νέες επιλογές. Προστέθηκε σημείωση στην
 κάρτα «After a cast» (Forever, tracker μη μαθημένος): «Cast it once out of combat...». Εκκρεμεί τεστ σε μάχη.
 
+### «Hide while I am dead» (8/11) — επιβεβαιώθηκε in-game (Forever), ΚΟΙΝΟ (retail+Forever)
+Situation → κάρτα «When it shows»: `hideDead` (default ON· παλιά auras χωρίς τιμή = ON, `~= false`).
+Core: έλεγχος `UnitIsDeadOrGhost("player")` στην αρχή του `ShowRulesAllow` + events PLAYER_DEAD/ALIVE/UNGHOST
+(με pcall). Δεν έχει ανέβει στο GitHub.
+
 ### Glow πάνω από τον χάρτη (8/11) — διορθώθηκε, επιβεβαιώθηκε in-game
 Το `GL` (glow) ήταν ένα strata ΠΑΝΩ από το εικονίδιο (`EFFECT_STRATA`) → layer 3: εικονίδιο MEDIUM, glow HIGH =
 ίδιο με τον χάρτη. Τώρα: ίδιο strata με το εικονίδιο + frame level +20 (2 σημεία στο core). Το `EFFECT_STRATA`
@@ -151,8 +156,14 @@ removed + byInstance) και «known instances» στο `[combat] entered`. Comb
 6. **Καθάρισμα στο τέλος:** `ForeverProbe.lua` (+ γραμμές στα 2 toc), οι κλήσεις
    `HeadsUpAuras_Log` και τα `HeadsUpAurasDB.log/probe` στο SavedVariables· αχρησιμοποίητα:
    `Media/fx/rim_gold.tga`, `RIM_BY_STYLE`/`RIM_GOLD` στον core.
-7. **GitHub:** δεν υπάρχει git repo εδώ· όταν μπει, `AGENTS.md`/`NOTES.md` στο `.gitignore`
-   και χωρίς debug αρχεία.
+7. **GitHub (8/11):** repo `ElaNte75/HeadsUpAuras` (δημόσιο), τοπικός κλώνος
+   `C:\Users\ElaNte\Desktop\Projects\HeadsUp_Addon` (τα αρχεία του addon στον υποφάκελο `HeadsUpAuras/`).
+   Commit `2930a5d` στο **main** (απόφαση χρήστη): όλες οι αλλαγές του Forever + `NOTES.md` στη ρίζα
+   (με `<ACCOUNT>` αντί για το όνομα λογαριασμού). ΧΩΡΙΣ `ForeverProbe.lua` (και χωρίς τη γραμμή του στα toc).
+   Το `AGENTS.md` του repo (τεχνικό) δεν αντικαταστάθηκε. Ο τοπικός κλώνος ΔΕΝ ενημερώθηκε (είχε δικές του
+   αλλαγές σε `scripts/ship.ps1`, `tools/make_fx.py` που δεν πειράχτηκαν) → χρειάζεται `git pull` με προσοχή.
+   Έλεγχος σύνταξης Lua υπάρχει: `py` + `lupa` (βλ. AGENTS.md του repo) — χρησιμοποιήθηκε, όλα OK.
+   Οι κοινές οπτικές αλλαγές (rim, pulse, glow strata) ισχύουν και στο retail από το GitHub, αδοκίμαστες εκεί.
 
 ### Πρόταση για το επόμενο session
 Νέο session (το τρέχον έχει μεγάλο context). Μοντέλο: Sonnet για μικρές διορθώσεις και

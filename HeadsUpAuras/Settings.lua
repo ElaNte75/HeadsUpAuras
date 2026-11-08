@@ -2294,6 +2294,13 @@ local function BuildSituationPage(page, counter)
             return "Tick Show it only, then In combat, to use this."
         end,
     })
+    when:Condition({
+        label = "Hide while I am dead",
+        -- on unless unticked (an aura made before this option has nothing saved: it counts as ticked)
+        get = function(d) return d.hideDead ~= false end,
+        set = function(d, v) d.hideDead = v and true or false end,
+        tip = Tip("Hide while I am dead", "While you are dead or a ghost (on the way back to your body) the aura is not shown: there is nothing to press. It shows again the moment you are alive.", "Untick it if this aura should show even then."),
+    })
 
     local who = page:Card(counter and "Characters" or "Specializations")
     if counter then
