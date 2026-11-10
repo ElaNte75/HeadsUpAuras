@@ -842,8 +842,11 @@ function CardMethods:Relayout()
         end
     end
     self:SetHeight(self.used + 8 - shift)
-    self.page.y = self.top + self:GetHeight() + L.CARD_GAP
-    self.page.child:SetHeight(math.max(self.page.y - L.CARD_GAP, 10))
+    -- the cards under this one move up (or down) with it: no empty gap between two cards
+    if self.page.Restack then self.page:Restack() else
+        self.page.y = self.top + self:GetHeight() + L.CARD_GAP
+        self.page.child:SetHeight(math.max(self.page.y - L.CARD_GAP, 10))
+    end
 end
 
 -- the next row; returns where the top of a control of that row is
@@ -1007,8 +1010,20 @@ end
 function CardMethods:Note(def)
     self.rowY = self:AddRow()
     local fs = UI.Text(self, 11, C.muted)
-    fs:SetPoint("LEFT", self, "TOPLEFT", L.PAD, -(self.rowY + L.CTRL_H / 2))
+    local rows = def.rows or 1   -- a longer note can take two (or more) lines
+    if rows > 1 then
+        for _ = 2, rows do self:AddRow() end
+        fs:SetWordWrap(true)
+        fs:SetJustifyV("TOP")
+        fs:SetJustifyH("LEFT")
+        fs:SetPoint("TOPLEFT", self, "TOPLEFT", L.PAD, -(self.rowY + 2))
+        fs:SetHeight(rows * L.ROW_H - (L.ROW_H - L.CTRL_H))
+    else
+        fs:SetPoint("LEFT", self, "TOPLEFT", L.PAD, -(self.rowY + L.CTRL_H / 2))
+    end
     fs:SetWidth(L.INNER_W)
+    -- (a row of its own: it moves up with the rows above it when some of them are not shown)
+    TrackRow(self, { fs })
     registry[#registry + 1] = { Sync = function(d)
         fs:SetText(d and def.text(d) or "")
         local c = d and def.color and def.color(d) or C.muted
@@ -1146,13 +1161,30 @@ function UI.NewPage(parent)
     end)
     scroll:HookScript("OnHide", function() bar:Hide() end)
 
-    local page = { frame = scroll, child = child, y = 0 }
+    local page = { frame = scroll, child = child, y = 0, cards = {} }
+
+    -- put the cards one under the other again, each as tall as it is now
+    function page:Restack()
+        local y = 0
+        for _, c in ipairs(self.cards) do
+            if c:IsShown() then
+                c.top = y
+                c:ClearAllPoints()
+                c:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
+                c:SetWidth(L.PAGE_W)
+                y = y + c:GetHeight() + L.CARD_GAP
+            end
+        end
+        self.y = y
+        child:SetHeight(math.max(y - L.CARD_GAP, 10))
+    end
 
     function page:Card(title)
         local card = UI.Box(child, C.card, C.border)
         for k, v in pairs(CardMethods) do card[k] = v end
         card.page = self
         allCards[#allCards + 1] = card
+        self.cards[#self.cards + 1] = card
         card.top = self.y
         card.used = L.TITLE_H
         card:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -self.y)

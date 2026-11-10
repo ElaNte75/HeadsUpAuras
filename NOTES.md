@@ -111,10 +111,50 @@ UNIT_AURA, τέλος μάχης, login) → διόρθωση από το πρα
 Επιβεβαιώθηκε: μετά το πρώτο cast εκτός μάχης ο tracker LS δείχνει τις νέες επιλογές. Προστέθηκε σημείωση στην
 κάρτα «After a cast» (Forever, tracker μη μαθημένος): «Cast it once out of combat...». Εκκρεμεί τεστ σε μάχη.
 
+### Εναλλακτικά imbues/buffs + δύο εικονίδια στο ίδιο σημείο (8/11) — ΑΔΟΚΙΜΑΣΤΟ
+- **«Or any of these»** (πρώην «Also counts», `alsoCounts = { [όνομα ability] = true }`, ανά ΟΝΟΜΑ → κάθε rank): στην κάρτα «After a cast»
+  για imbue/buff trackers. Το εικονίδιο ανάβει μόνο όταν ΚΑΝΕΝΑ δεν υπάρχει (ImbueWatch `WantedFor`,
+  BuffWatch: ακολουθεί αυτό που κρατάει περισσότερο· cast εναλλακτικού ξεκινά timer σε μάχη).
+- Trackers που ακολουθούν πραγματικό imbue/buff: οι συνθήκες στόχου (εχθρός/ζωντανός κ.λπ.) ΔΕΝ μετράνε
+  (`ReadableConditionsMet`· το crowd μετράει). Αιτία: ο LS tracker είχε tgtHostile/enemyAlive ενεργά.
+- **ΣΗΜΑΝΤΙΚΟ bug που βρέθηκε:** τα `buffStacks`, `hideDead` έλειπαν από το `KEYS` του core → δεν
+  αποθηκεύονταν (το hideDead δούλευε μόνο ως default). Προστέθηκαν μαζί με `alsoCounts` (+ copy/dirty).
+- Probe: γραμμές `[vis]` (κάθε 0.5s, μόνο σε αλλαγή): ανά εικονίδιο shown/alpha/hide/imbue/buff — για το θέμα
+  «δύο εικονίδια στο ίδιο σημείο: όταν καλύπτω το ένα χάνεται και το άλλο». Αναμένεται τεστ χρήστη.
+
+### Specs χωρίς ονόματα + κείμενο «Important info» (10/11) — ΑΔΟΚΙΜΑΣΤΟ, ΚΟΙΝΟ
+- Η λίστα Specializations έδειχνε κουτάκια χωρίς ονόματα (retail ΚΑΙ Forever). Αιτία: δικό μας bug από το port
+  (`ClassSpecs`: «local id, name = infoFn and infoFn(i)» κρατούσε μόνο το id). Διορθώθηκε.
+- Σημείωση «Tip: a buff on you or a weapon imbue? Cast it once...» στην κάρτα «After a cast» (tracker που δεν
+  έχει μάθει ακόμα): ισχύει πλέον και στο retail, καλύπτει και imbues. Ο χρήστης θέλει να «διαφημίζει» την εκμάθηση.
+- Κάρτα «After a cast»: οι Notes (UI.lua `CardMethods:Note`) μπαίνουν πλέον στο `TrackRow` → ανεβαίνουν όταν
+  κρύβονται γραμμές (πριν έμενε κενό και η σημείωση έβγαινε έξω από την κάρτα). ΚΟΙΝΟ, επηρεάζει όλες τις Notes.
+- Κενό ΑΝΑΜΕΣΑ στις κάρτες: οι κάρτες είχαν σταθερή θέση· τώρα `page:Restack()` (UI.lua) τις ξαναστοιβάζει όταν
+  μια κάρτα μικραίνει (καλείται από `Relayout`). ΚΟΙΝΟ, όλες οι σελίδες του wizard.
+- Notes με `rows = N` (UI.lua): σε πολλές γραμμές με αναδίπλωση· η σημείωση της «After a cast» έχει 2.
+- «Also show at N stacks» φαίνεται μόνο αν το buff έχει δει >1 stack (ή έχει ήδη ρυθμιστεί)· πριν φαινόταν και
+  στο Skyfury (retail) που δεν έχει stacks.
+- «Or any of these»: μένει ελεύθερη επιλογή του χρήστη (όλα τα abilities)· εξηγείται στη σημείωση της κάρτας
+  (`ANY_NOTE`). Απόφαση χρήστη: όχι περιορισμός της λίστας.
+- Ετικέτες: «Show the icon» (imbueWarn) → «Warn me»· «Show it» (trackShow): «while it is on» / «while it is missing».
+- «Important info»: στο Forever άλλο κείμενο (`INFO_PARAGRAPHS`, Forever: buffs από cast + έλεγχος μετά τη μάχη,
+  imbues διαβάζονται και σε μάχη). Το παράθυρο μεγαλώνει με το κείμενο.
+
+### Χρόνος από την περιγραφή: λεπτά/ώρες (10/11) — ΑΔΟΚΙΜΑΣΤΟ, ΚΟΙΝΟ
+`SuggestedDuration` (Settings) καταλαβαίνει sec/min/hour(s)/hr(s) («Lasts 1 hour» → 3600). Όριο `MAX_HIDE` =
+3 ώρες (10800 s, απόφαση χρήστη) αντί για 300· το κουτάκι «hide for» δέχεται έως 5 ψηφία. Ισχύει όταν
+διαλέγεται το ability (υπάρχοντες trackers κρατάνε τον παλιό χρόνο). Αφορμή: στο retail ο Flametongue tracker
+έβγαζε 10 s. **ImbueWatch + BuffWatch τρέχουν πλέον ΚΑΙ στο retail** (απόφαση χρήστη 10/11, ΑΔΟΚΙΜΑΣΤΟ εκεί). Το BuffWatch
+μόνο για kind=="tracker". Το ForeverRanks μένει forever-only. Το `ForeverProbe.lua` τρέχει ΠΡΟΣΩΡΙΝΑ και στο
+retail (`HeadsUpAurasDB.probe` στο SavedVariables του `_retail_`) — να ξαναμπεί το gate στο καθάρισμα.
+Ο χρήστης αντιγράφει μόνος του τον φάκελο Forever → retail για δοκιμές.
+Στο retail έβγαζε πάλι 10 s: πιθανή αιτία ο κωδικός πληθυντικού «|4hour:hrs;» στις περιγραφές → αφαιρείται
+(Settings `SuggestedDuration`, BuffWatch `DescDuration`). ΠΡΟΣΩΡΙΝΟ log στο `SelectAbility` («suggested=… desc=…»).
+
 ### «Hide while I am dead» (8/11) — επιβεβαιώθηκε in-game (Forever), ΚΟΙΝΟ (retail+Forever)
 Situation → κάρτα «When it shows»: `hideDead` (default ON· παλιά auras χωρίς τιμή = ON, `~= false`).
 Core: έλεγχος `UnitIsDeadOrGhost("player")` στην αρχή του `ShowRulesAllow` + events PLAYER_DEAD/ALIVE/UNGHOST
-(με pcall). Δεν έχει ανέβει στο GitHub.
+(με pcall). Ανέβηκε στο GitHub main: commit `2cdfb5a`.
 
 ### Glow πάνω από τον χάρτη (8/11) — διορθώθηκε, επιβεβαιώθηκε in-game
 Το `GL` (glow) ήταν ένα strata ΠΑΝΩ από το εικονίδιο (`EFFECT_STRATA`) → layer 3: εικονίδιο MEDIUM, glow HIGH =

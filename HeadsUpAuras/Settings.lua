@@ -72,22 +72,30 @@ end
 -- How long the effect of an ability lasts, read from its description in the spell book
 -- (the description already has the player's talents worked in). Returns whole seconds,
 -- or nil when the text has no duration. It is only a suggestion: the player can correct it.
+-- the longest "hide for" time: 3 hours (long buffs and weapon imbues last 1 hour or more)
+local MAX_HIDE = 3 * 3600
 local function SuggestedDuration(spellID)
     -- the game's own data first (KnownDurations.lua, made by tools/make_durations.py): the effect the ability leaves on an enemy
     local info = C_Spell.GetSpellInfo(spellID)
     local known = info and HeadsUpAurasDurations and HeadsUpAurasDurations[select(2, UnitClass("player"))]
     known = known and known[info.name]
-    if known then return math.min(math.max(math.floor(known[1] + 0.5), 1), 300), true end
+    if known then return math.min(math.max(math.floor(known[1] + 0.5), 1), MAX_HIDE), true end
     local desc = C_Spell.GetSpellDescription(spellID)
     if type(desc) ~= "string" or issecretvalue(desc) or desc == "" then return nil end
-    desc = desc:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):lower()
-    -- best guess first: "for 10 sec", then "lasts 10 sec", then any "10 sec"
-    local n = desc:match("for (%d+%.?%d*) sec")
-        or desc:match("lasts? (%d+%.?%d*) sec")
-        or desc:match("(%d+%.?%d*) sec")
-    n = n and tonumber(n)
+    desc = desc:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+    -- the game writes plurals as "|4hour:hours;": keep the first word ("1 hour")
+    desc = desc:gsub("|4([^:;]*):[^;]*;", "%1"):lower()
+    -- best guess first: "lasts 1 hour" / "lasts 10 min", then "for 10 sec", then any "10 sec" (seconds, minutes, hours)
+    local UNITS = { { "hours?", 3600 }, { "hrs?", 3600 }, { "min", 60 }, { "sec", 1 } }
+    local function Find(fmt)
+        for _, u in ipairs(UNITS) do
+            local n = desc:match(fmt:format(u[1]))
+            if n and tonumber(n) then return tonumber(n) * u[2] end
+        end
+    end
+    local n = Find("lasts? (%%d+%%.?%%d*) %s") or Find("for (%%d+%%.?%%d*) %s") or Find("(%%d+%%.?%%d*) %s")
     if not n then return nil end
-    return math.min(math.max(math.floor(n + 0.5), 1), 300)
+    return math.min(math.max(math.floor(n + 0.5), 1), MAX_HIDE)
 end
 
 -- the facts of the draft's ability, remembered until the spell book changes
@@ -258,7 +266,8 @@ local function ClassSpecs()
     local count = countFn and countFn() or 0
     if type(count) ~= "number" or issecretvalue(count) then count = 0 end
     for i = 1, count do
-        local id, name = infoFn and infoFn(i)
+        local id, name
+        if infoFn then id, name = infoFn(i) end   -- (both values: "infoFn and infoFn(i)" would keep only the id)
         if id and not issecretvalue(id) then list[#list + 1] = { id = id, name = name } end
     end
     return list
@@ -343,7 +352,7 @@ end
 -- a number box that stores a whole number between lo and hi in d[key]
 local function Number(key, lo, hi, default, unit)
     return {
-        type = "input", numeric = true, maxLetters = 3, unit = unit,
+        type = "input", numeric = true, maxLetters = math.max(3, #tostring(hi)), unit = unit,
         get = function(d) return d[key] or default end,
         set = function(d, v) d[key] = UI.Clamp(math.floor(v + 0.5), lo, hi) end,
     }
@@ -511,6 +520,17 @@ local INFO_PARAGRAPHS = {
     "HeadsUp Auras does its best to make things work anyway, and keeps looking for smarter ways around these limits. But the limits are real, so in some cases the result can be inaccurate.",
     "If something does not look right, please tell us with the Feedback button: it helps us find better ways.",
 }
+-- WoW Forever runs on the same modern game, with the same limits, but its own way around them
+do
+    local build = select(4, GetBuildInfo())
+    if (WOW_PROJECT_CAMELOT and WOW_PROJECT_ID == WOW_PROJECT_CAMELOT) or (build and build >= 16000 and build < 20000) then
+        INFO_PARAGRAPHS = {
+            "WoW Forever runs on the same modern game as Midnight, so the same rules apply: while you are in combat, Blizzard hides a lot of information from add-ons, for example the buffs and debuffs on you and on your enemy.",
+            "HeadsUp Auras works around it: a buff on you follows the time of your cast in combat, and is checked again the moment the fight ends. Weapon imbues (Rockbiter, Flametongue...) can be read even in combat. But the limits are real, so in some cases the result can be late or inaccurate.",
+            "If something does not look right, please tell us with the Feedback button: it helps us find better ways.",
+        }
+    end
+end
 local infoBody = UI.Text(infoPanel, 12, C.text)
 infoBody:SetWordWrap(true)
 infoBody:SetJustifyV("TOP")
@@ -530,6 +550,9 @@ infoButton:SetScript("OnClick", function()
     end
     feedbackPanel:Hide()
     infoPanel:Show()
+    -- the panel grows with its text (the Forever text is longer): title + text + the button
+    local h = infoBody:GetStringHeight()
+    if type(h) == "number" and h > 0 then infoPanel:SetHeight(math.max(236, math.ceil(h) + 104)) end
 end)
 feedbackButton:HookScript("OnClick", function()
     if feedbackPanel:IsShown() then infoPanel:Hide() end
@@ -1895,7 +1918,7 @@ end
 
 local function BuildAfterCastCard(page)
     local afterCast = page:Card("After a cast")
-    local hideTimer = Number("suppressSeconds", 1, 300, 10, "sec")
+    local hideTimer = Number("suppressSeconds", 1, MAX_HIDE, 10, "sec")
     -- a weapon imbue (Forever): the addon reads the real time left from the game, so no timer is needed
     local function isImbue(d) return d ~= nil and HeadsUpAuras_ImbueOwns ~= nil and HeadsUpAuras_ImbueOwns(d) and true or false end
     -- a buff on you (Forever, BuffWatch.lua): the real buff is read from the game out of combat
@@ -1921,7 +1944,7 @@ local function BuildAfterCastCard(page)
         { value = 600, text = "10 minutes before it ends" },
     }
     afterCast:Field({
-        label = "Show the icon",
+        label = "Warn me",
         shown = followsImbue,
         usable = function(d) return HasAbility(d) and d.trackShow ~= "while" end,
         tip = function(tt, d)
@@ -1936,9 +1959,57 @@ local function BuildAfterCastCard(page)
         end,
         controls = { Choice("imbueWarn", IMBUE_WARN, 0) },
     })
+    -- "Also counts": other abilities that do the same job (only one can be on: Rockbiter OR Flametongue,
+    -- one armor of the mage...). The icon shows only when none of them is on. Stored by NAME (any rank).
+    local function OwnName(d)
+        local info = d and d.spellID and C_Spell.GetSpellInfo(d.spellID)
+        return info and info.name
+    end
+    afterCast:Field({
+        label = "Or any of these",
+        shown = followsImbue,
+        usable = HasAbility,
+        tip = Tip("Or any of these", "Other abilities that do the same job, when only one of them can be on you or on the weapon at a time (for example Rockbiter or Flametongue on the weapon, one armor of the mage). Tick them: any of them counts as this one, and the icon shows only when none of them is on.", "Make one aura for the group instead of one for each ability."),
+        controls = {
+            {
+                type = "dropdown",
+                text = function(d)
+                    local names = {}
+                    for n in pairs(d and d.alsoCounts or {}) do names[#names + 1] = n end
+                    table.sort(names)
+                    return #names > 0 and table.concat(names, ", ") or "None"
+                end,
+                items = function(d)
+                    local own = OwnName(d)
+                    local list = GetAbilities()
+                    if HeadsUpAuras_TrackableOnly then list = HeadsUpAuras_TrackableOnly(list) end
+                    local items = {}
+                    for _, a in ipairs(list) do
+                        if a.name ~= own then
+                            items[#items + 1] = {
+                                text = a.name, icon = a.icon, keepOpen = true,
+                                selected = function() return d.alsoCounts and d.alsoCounts[a.name] and true or false end,
+                                onClick = function()
+                                    d.alsoCounts = d.alsoCounts or {}
+                                    d.alsoCounts[a.name] = (not d.alsoCounts[a.name]) and true or nil
+                                    UI.Changed()
+                                end,
+                            }
+                        end
+                    end
+                    if #items == 0 then items[1] = { text = "No other abilities", disabled = true } end
+                    return items
+                end,
+            },
+        },
+    })
     afterCast:Field({
         label = "Also show at",
-        shown = function(d) return isBuff(d) end,
+        -- only for a buff that was seen with more than one stack (Lightning Shield...): Skyfury has none
+        shown = function(d)
+            return isBuff(d) and HeadsUpAuras_BuffStacks ~= nil and HeadsUpAuras_BuffStacks(d) > 1
+                or (d ~= nil and (d.buffStacks or 0) > 0 and isBuff(d))
+        end,
         usable = function(d) return HasAbility(d) and d.trackShow ~= "while" end,
         tip = Tip("Few stacks left", "For a buff with stacks or charges (it loses one each time something happens, like a shield that loses a charge when you are hit): the icon shows also when the buff has this many stacks or fewer, so you renew it before it is gone.", "The game hides the buffs in combat, so the stacks are checked out of combat (the moment a fight ends, too)."),
         controls = { Choice("buffStacks", STACKS, 0) },
@@ -1971,20 +2042,23 @@ local function BuildAfterCastCard(page)
         usable = function(d) return HasAbility(d) and d.suppressEnabled and true or false end,
         tip = Tip("New target", "Each enemy has its own timer. When you change target, the timer of the new enemy is shown: none if you did not hit it yet (the effect is not on it), or the time that is left if you did. Going back to an enemy you hit before continues its timer.", "The addon recognizes an enemy by its id, which it can read in combat. The timers are forgotten when the fight ends."),
     })
+    -- what "Or any of these" is for (the same text for a buff and for a weapon imbue)
+    local ANY_NOTE = "Or any of these: tick the abilities that replace this one, when only one of them can be on (Rockbiter or Flametongue, one armor...). Not needed? Leave it on None."
     afterCast:Note({
+        rows = 2,   -- (the tip about learning a buff / an imbue is long)
         text = function(d)
             if isBuff(d) then
-                return "The real time left of the buff is read from the game (out of combat): no timer to set."
+                return "The real time left of the buff is read from the game (out of combat). " .. ANY_NOTE
             end
             if followsImbue(d) then
-                return "The real time left of the imbue is read from the game: no timer to set."
+                return "The real time left of the imbue is read from the game. " .. ANY_NOTE
             end
             if d and d.trackerOf then
                 return "The time is suggested from the game's data: correct it if it is not right for you."
             end
-            -- Forever (BuffWatch.lua): a buff on you is learned the first time it is seen on you
+            -- BuffWatch.lua / ImbueWatch.lua: a buff on you or a weapon imbue is learned the first time it is seen
             if HeadsUpAuras_BuffOwns and d and d.kind == "tracker" then
-                return "A buff on you? Cast it once out of combat: the addon learns it and then follows the real buff (its time, its stacks). This box changes to show it."
+                return "Tip: a buff on you or a weapon imbue? Cast it once, out of combat. HeadsUp Auras learns it and from then on follows the real one (the time left, the stacks). Open this aura again and you get more options here."
             end
             return "The hide time is suggested from the game's data or the ability's description."
         end,
@@ -2196,10 +2270,10 @@ local function BuildTimerPage(page, withCue)
     showing:Field({
         label = "Show it",
         usable = HasAbility,
-        tip = Tip("When the effect is shown", "While it lasts: it shows from the moment you cast the ability until the timer ends (a bar that empties). When it is gone: it shows after the timer ended, to remind you that the enemy lost the effect.", "A bar is usually shown while the effect lasts."),
+        tip = Tip("When the effect is shown", "While it is on: it shows from the moment you cast the ability until the effect is over (a bar that empties). While it is missing: it shows when the effect is not there, to remind you to cast it again.", "A bar is usually shown while the effect lasts."),
         controls = { Choice("trackShow", {
-            { value = "while", text = "while it lasts", tip = "The icon shows from the moment the effect starts until it is over (a bar that empties)." },
-            { value = "hide", text = "when it is gone", tip = "The icon shows when the effect is not there: it reminds you to cast the ability again." } }, "hide") },
+            { value = "while", text = "while it is on", tip = "The icon shows from the moment the effect starts until it is over (a bar that empties)." },
+            { value = "hide", text = "while it is missing", tip = "The icon shows when the effect is not there: it reminds you to cast the ability again." } }, "hide") },
     })
     if not withCue then return end
     local cue = page:Card("The ability")

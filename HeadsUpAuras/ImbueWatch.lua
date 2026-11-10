@@ -1,4 +1,4 @@
--- ImbueWatch.lua — WoW Forever ONLY (does nothing on retail).
+-- ImbueWatch.lua — WoW Forever and retail (since 10/11; it was Forever only before).
 --
 -- Weapon imbues (Rockbiter Weapon, Flametongue ...) are not normal buffs: they never appear in the
 -- aura list. The game tells about them through GetWeaponEnchantInfo(), which stays readable in combat.
@@ -10,10 +10,8 @@
 -- Which enchant belongs to which ability is learned by itself (cast the ability, see which enchant
 -- appears) and kept in HeadsUpAurasDB.imbues; Rockbiter Weapon is known from the start.
 
-local build = select(4, GetBuildInfo())
-local isForever = (WOW_PROJECT_CAMELOT and WOW_PROJECT_ID == WOW_PROJECT_CAMELOT)
-    or (build and build >= 16000 and build < 20000)
-if not isForever or not GetWeaponEnchantInfo then return end
+-- (whatever cannot be read, secret in combat for example, is skipped: the aura keeps its timer)
+if not GetWeaponEnchantInfo then return end
 
 -- ability (spell id) -> enchant id the game reports on the weapon
 local SEED = { [8017] = 29 }     -- Rockbiter Weapon
@@ -62,6 +60,21 @@ local function EnchantsFor(spellID)
     return any and set or nil
 end
 
+-- "Also counts" (cfg.alsoCounts = { [ability name] = true }): the imbues of those abilities are fine too
+-- (Rockbiter OR Flametongue: only one can be on the weapon)
+local function WantedFor(c)
+    local set = EnchantsFor(c.spellID)
+    if not set or type(c.alsoCounts) ~= "table" then return set end
+    local learned = HeadsUpAurasDB and HeadsUpAurasDB.imbues or {}
+    for _, tbl in ipairs({ SEED, learned }) do
+        for sid, eid in pairs(tbl) do
+            local n = NameOf(sid)
+            if n and c.alsoCounts[n] then set[eid] = true end
+        end
+    end
+    return set
+end
+
 -- { {has, left(seconds), id}, ... } for main hand, off hand, thrown — or nil if it cannot be read.
 -- (GetWeaponEnchantInfo returns 4 values per slot: has, milliseconds left, charges, enchant id.)
 local function ReadSlots()
@@ -94,7 +107,7 @@ local function Sync()
     HeadsUpAuras_EachIndicator(function(ind)
         local c = ind.cfg
         if c and c.suppressEnabled and c.spellID then
-            local want = EnchantsFor(c.spellID)
+            local want = WantedFor(c)
             if want then
                 local left
                 for _, s in ipairs(slots) do

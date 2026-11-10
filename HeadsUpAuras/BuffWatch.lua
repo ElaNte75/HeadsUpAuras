@@ -1,4 +1,5 @@
--- BuffWatch.lua — WoW Forever ONLY (on retail it stops at once and defines nothing).
+-- BuffWatch.lua — WoW Forever and retail (since 10/11; it was Forever only before).
+-- Only Tracker auras use it (an Ability aura with "hide after a cast" keeps its plain timer).
 --
 -- A tracker of an ability that puts a BUFF ON YOU (Lightning Shield, Mark of the Wild, Arcane Intellect,
 -- any class) follows the real buff instead of a fixed "hide for N seconds" timer.
@@ -17,10 +18,6 @@
 -- Which abilities are buffs on you is learned by itself: when the buff of the same name is seen on you
 -- (HeadsUpAurasDB.buffs[name] = { dur = seconds, stk = most stacks seen }). No spell is listed by hand.
 
-local build = select(4, GetBuildInfo())
-local isForever = (WOW_PROJECT_CAMELOT and WOW_PROJECT_ID == WOW_PROJECT_CAMELOT)
-    or (build and build >= 16000 and build < 20000)
-if not isForever then return end
 
 local function Secret(v)
     return issecretvalue and issecretvalue(v) or false
@@ -49,7 +46,7 @@ local function ReadBuff(spellID, name)
         if not ok then return nil end
         a = r
     end
-    if not a and C_UnitAuras.GetPlayerAuraBySpellID then
+    if not a and spellID and C_UnitAuras.GetPlayerAuraBySpellID then
         local ok, r = pcall(C_UnitAuras.GetPlayerAuraBySpellID, spellID)
         if not ok then return nil end
         a = r
@@ -67,7 +64,7 @@ local function DescDuration(spellID)
     if not C_Spell or not C_Spell.GetSpellDescription then return nil end
     local ok, text = pcall(C_Spell.GetSpellDescription, spellID)
     if not ok or type(text) ~= "string" or Secret(text) then return nil end
-    local t = text:lower()
+    local t = text:gsub("|4([^:;]*):[^;]*;", "%1"):lower()   -- ("1 |4hour:hrs;" -> "1 hour")
     local part = t:match("lasts%s+(.*)") or t
     local n, unit = part:match("(%d+%.?%d*)%s*(%a+)")
     n = tonumber(n)
@@ -80,7 +77,7 @@ end
 
 -- a tracker of a buff on you? (not a weapon imbue: ImbueWatch.lua has those)
 function HeadsUpAuras_BuffOwns(cfg)
-    if not (cfg and cfg.spellID and cfg.suppressEnabled) then return false end
+    if not (cfg and cfg.spellID and cfg.suppressEnabled and cfg.kind == "tracker") then return false end
     if HeadsUpAuras_ImbueOwns and HeadsUpAuras_ImbueOwns(cfg) then return false end
     local name = NameOf(cfg.spellID)
     if Learned(name) then return true end
@@ -129,12 +126,24 @@ local function Sync()
     local now = GetTime()
     HeadsUpAuras_EachIndicator(function(ind)
         local c = ind.cfg
-        if not (c and c.suppressEnabled and c.spellID) then return end
+        if not (c and c.suppressEnabled and c.spellID and c.kind == "tracker") then return end
         if HeadsUpAuras_ImbueOwns and HeadsUpAuras_ImbueOwns(c) then return end
         local name = NameOf(c.spellID)
         local b = ReadBuff(c.spellID, name)
         if b == nil then return end
         if b then Remember(name, b) elseif not Learned(name) then return end   -- not a buff we know
+        -- "Also counts" (cfg.alsoCounts = { [ability name] = true }): any of those buffs is fine too;
+        -- the one that lasts longest is followed
+        if type(c.alsoCounts) == "table" then
+            for alt in pairs(c.alsoCounts) do
+                local ab = ReadBuff(nil, alt)
+                if ab == nil then return end
+                if ab then
+                    Remember(alt, ab)
+                    if not b or (b.left and (ab.left == nil or ab.left > b.left)) then b = ab end
+                end
+            end
+        end
         local new
         if b then
             local hide = HideFor(c, b.left)
@@ -156,7 +165,9 @@ local function AfterCast(spellID)
     local now = GetTime()
     HeadsUpAuras_EachIndicator(function(ind)
         local c = ind.cfg
-        if not (c and c.suppressEnabled and c.spellID) or NameOf(c.spellID) ~= castName then return end
+        if not (c and c.suppressEnabled and c.spellID and c.kind == "tracker") then return end
+        local alt = type(c.alsoCounts) == "table" and c.alsoCounts[castName]
+        if NameOf(c.spellID) ~= castName and not alt then return end
         if HeadsUpAuras_ImbueOwns and HeadsUpAuras_ImbueOwns(c) then return end
         local l = Learned(castName)
         local dur = (l and l.dur) or DescDuration(spellID)

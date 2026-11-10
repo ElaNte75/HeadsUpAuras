@@ -1,3 +1,33 @@
+## HeadsUp Auras 1.5
+
+### New: trackers that follow the real buff or weapon imbue
+
+- A **Tracker** of a buff on you (Skyfury, Lightning Shield, an armor...) or of a **weapon imbue** (Flametongue, Windfury, Rockbiter...) learns it the first time you cast it out of combat, and from then on follows the real one: the time left and the stacks. A tip in the *Tracking* step tells you when it has not learned it yet.
+- **Warn me**: when it is gone, or 15 seconds up to 10 minutes before it ends, so you renew it in time.
+- **Or any of these**: tick the abilities that replace this one, when only one of them can be on (Rockbiter or Flametongue, one armor of the mage...). The icon shows only when none of them is on.
+- **Also show at N stacks or fewer**, for a buff with stacks or charges.
+- In combat the game hides the buffs from add-ons: there the time of your cast is used, and everything is checked again the moment the fight ends. Weapon imbues are read even in combat.
+
+### New: WoW Forever
+
+- HeadsUp Auras now runs on **WoW Forever** too.
+- Abilities with ranks are listed once, and any rank you cast counts.
+- The Tracker list shows only the abilities whose effect lasts.
+
+### New: Hide while I am dead
+
+- *Situation* step: the aura is not shown while you are dead or a ghost. On by default, also for your old auras; untick it where you want.
+
+### Changes and fixes
+
+- The time of *After I cast it, hide for* is read from the ability's description in minutes and hours too (Lasts 1 hour = 3600 seconds), up to 3 hours.
+- Round icons: a new rim (thickness 1 to 3) in gold, the colour of your class or your own colour, and a smoother Pulse.
+- The glow of an icon is no longer drawn over the world map.
+- A tracker of a buff or an imbue on you no longer needs an enemy as target.
+- The list of specializations shows their names again.
+- No more empty space between the cards of the settings window.
+- Some options (stacks, Hide while I am dead) were not saved: they are now.
+
 ## HeadsUp Auras 1.4
 
 ### New: Text on the icon

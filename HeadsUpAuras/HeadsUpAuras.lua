@@ -38,6 +38,8 @@ end)
 -- HeadsUpAurasDB.log — read from the SavedVariables file after /reload. Temporary debug aid.
 local pendingLog = {}
 function HeadsUpAuras_Log(tag, msg)
+    -- only while developing: ForeverProbe.lua (never published) turns it on; players get no log
+    if not HEADSUPAURAS_DEBUG then return end
     local entry = date("%Y-%m-%d %H:%M:%S  ") .. "[" .. tag .. "] " .. tostring(msg):sub(1, 300)
     if HeadsUpAurasDB then
         local list = HeadsUpAurasDB.log or {}
@@ -56,7 +58,7 @@ local EFFECT_STRATA = { "LOW", "MEDIUM", "HIGH", "DIALOG", "FULLSCREEN" }
 -- How small the icon gets during "Pulse" (1 = not at all).
 local PULSE_SHRINK = 0.92
 
-local KEYS = { "class", "specs", "name", "hidden", "spellID", "healthEnabled", "healthOp", "healthPct", "enemyEnabled", "enemyOp", "enemyPct", "cdEnabled", "cdState", "chargesEnabled", "chargesState", "enemyAliveEnabled", "enemyAlive", "buffEnabled", "buffID", "buffState", "suppressEnabled", "suppressSeconds", "suppressReset", "uid", "trackerOf", "trackerCue", "kind", "trackShow", "barDrain", "barIcon", "barColor", "barTime", "barTimeOn", "barIconOn", "otherAuras", "crowdEnabled", "crowdOp", "crowdN", "crowdMetric", "group", "effect", "icon", "showWhenEnabled", "showRules", "lingerEnabled", "lingerSeconds", "layer", "availEnabled", "pos", "width", "height", "sizeLinked", "powerEnabled", "powerOp", "powerValue", "secEnabled", "secOp", "secValue", "buffAlways", "empowerFx", "soundEnabled", "soundKey", "soundVolume", "formEnabled", "formSpell", "tgtHostileEnabled", "tgtHostile", "tgtTypeEnabled", "tgtType", "tgtClassEnabled", "tgtClass", "threatEnabled", "threatState", "shape", "rimThick", "rimMode", "rimColor", "imbueWarn","empowerLight", "itemID", "ctIcon", "ctName", "ctNum", "ctColor", "ctSize", "ctBg", "ctBgAlpha", "ctWho", "ctChar", "ctType", "currencyID", "ctBank", "buffIgnore", "resWhat", "resShow", "resTextPos", "resColor", "resDir", "resStyle", "keyText", "keyPos", "keySize", "keyColor" }
+local KEYS = { "class", "specs", "name", "hidden", "spellID", "healthEnabled", "healthOp", "healthPct", "enemyEnabled", "enemyOp", "enemyPct", "cdEnabled", "cdState", "chargesEnabled", "chargesState", "enemyAliveEnabled", "enemyAlive", "buffEnabled", "buffID", "buffState", "suppressEnabled", "suppressSeconds", "suppressReset", "uid", "trackerOf", "trackerCue", "kind", "trackShow", "barDrain", "barIcon", "barColor", "barTime", "barTimeOn", "barIconOn", "otherAuras", "crowdEnabled", "crowdOp", "crowdN", "crowdMetric", "group", "effect", "icon", "showWhenEnabled", "showRules", "lingerEnabled", "lingerSeconds", "layer", "availEnabled", "pos", "width", "height", "sizeLinked", "powerEnabled", "powerOp", "powerValue", "secEnabled", "secOp", "secValue", "buffAlways", "empowerFx", "soundEnabled", "soundKey", "soundVolume", "formEnabled", "formSpell", "tgtHostileEnabled", "tgtHostile", "tgtTypeEnabled", "tgtType", "tgtClassEnabled", "tgtClass", "threatEnabled", "threatState", "shape", "rimThick", "rimMode", "rimColor", "imbueWarn","empowerLight", "itemID", "ctIcon", "ctName", "ctNum", "ctColor", "ctSize", "ctBg", "ctBgAlpha", "ctWho", "ctChar", "ctType", "currencyID", "ctBank", "buffIgnore", "resWhat", "resShow", "resTextPos", "resColor", "resDir", "resStyle", "keyText", "keyPos", "keySize", "keyColor", "buffStacks", "hideDead", "alsoCounts" }
 
 local auras = {}        -- saved list (HeadsUpAurasDB.auras)
 local pool = {}         -- pool[i] = indicator for auras[i]
@@ -236,7 +238,7 @@ local function CopyConfig(src)
     for _, k in ipairs(KEYS) do
         if k == "pos" and src.pos then
             copy.pos = { unpack(src.pos) }
-        elseif (k == "showRules" or k == "tgtClass") and src[k] then
+        elseif (k == "showRules" or k == "tgtClass" or k == "alsoCounts") and src[k] then
             copy[k] = {}
             for rule, on in pairs(src[k]) do copy[k][rule] = on end
         elseif k == "otherAuras" and src.otherAuras then
@@ -1498,6 +1500,11 @@ local function ReadableConditionsMet(cfg, lingering, skipTarget)
     end
     if not (cfg.enemyAliveEnabled or cfg.tgtHostileEnabled or cfg.tgtTypeEnabled
         or cfg.tgtClassEnabled or cfg.threatEnabled) then
+        return true
+    end
+    -- Forever: a tracker that follows the real imbue / buff ON YOU (ImbueWatch.lua, BuffWatch.lua) is not about
+    -- the target, so the conditions about the target do not count (on retail these functions do not exist)
+    if (HeadsUpAuras_ImbueOwns and HeadsUpAuras_ImbueOwns(cfg)) or (HeadsUpAuras_BuffOwns and HeadsUpAuras_BuffOwns(cfg)) then
         return true
     end
     if not UnitExists("target") then return false end
@@ -3137,7 +3144,7 @@ function HeadsUpAuras_IsDirty()
             for i = 1, 3 do
                 if a[i] ~= b[i] then return true end
             end
-        elseif k == "showRules" or k == "tgtClass" or k == "buffIgnore" then
+        elseif k == "showRules" or k == "tgtClass" or k == "buffIgnore" or k == "alsoCounts" then
             local a, b = draft[k] or {}, saved[k] or {}
             for rule, on in pairs(a) do
                 if (b[rule] and true or false) ~= (on and true or false) then return true end
