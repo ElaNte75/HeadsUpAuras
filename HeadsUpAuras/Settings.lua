@@ -1969,7 +1969,7 @@ local function BuildAfterCastCard(page)
         label = "Or any of these",
         shown = followsImbue,
         usable = HasAbility,
-        tip = Tip("Or any of these", "Other abilities that do the same job, when only one of them can be on you or on the weapon at a time (for example Rockbiter or Flametongue on the weapon, one armor of the mage). Tick them: any of them counts as this one, and the icon shows only when none of them is on.", "Make one aura for the group instead of one for each ability."),
+        tip = Tip("Or any of these", "Other abilities that do the same job, when only one of them can be on you or on your weapon at a time. Tick them: any of them counts as this one, and the icon shows only when none of them is on.", "Make one aura for the group instead of one for each ability."),
         controls = {
             {
                 type = "dropdown",
@@ -2043,7 +2043,7 @@ local function BuildAfterCastCard(page)
         tip = Tip("New target", "Each enemy has its own timer. When you change target, the timer of the new enemy is shown: none if you did not hit it yet (the effect is not on it), or the time that is left if you did. Going back to an enemy you hit before continues its timer.", "The addon recognizes an enemy by its id, which it can read in combat. The timers are forgotten when the fight ends."),
     })
     -- what "Or any of these" is for (the same text for a buff and for a weapon imbue)
-    local ANY_NOTE = "Or any of these: tick the abilities that replace this one, when only one of them can be on (Rockbiter or Flametongue, one armor...). Not needed? Leave it on None."
+    local ANY_NOTE = "Or any of these: if other abilities do the same job and only one of them can be on at a time, tick them. Not needed? Leave it on None."
     afterCast:Note({
         rows = 2,   -- (the tip about learning a buff / an imbue is long)
         text = function(d)

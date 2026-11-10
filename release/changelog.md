@@ -2,9 +2,9 @@
 
 ### New: trackers that follow the real buff or weapon imbue
 
-- A **Tracker** of a buff on you (Skyfury, Lightning Shield, an armor...) or of a **weapon imbue** (Flametongue, Windfury, Rockbiter...) learns it the first time you cast it out of combat, and from then on follows the real one: the time left and the stacks. A tip in the *Tracking* step tells you when it has not learned it yet.
+- A **Tracker** of a buff on you or of a **weapon imbue** learns it the first time you cast it out of combat, and from then on follows the real one: the time left and the stacks. A tip in the *Tracking* step tells you when it has not learned it yet.
 - **Warn me**: when it is gone, or 15 seconds up to 10 minutes before it ends, so you renew it in time.
-- **Or any of these**: tick the abilities that replace this one, when only one of them can be on (Rockbiter or Flametongue, one armor of the mage...). The icon shows only when none of them is on.
+- **Or any of these**: when other abilities do the same job and only one of them can be on at a time, tick them. The icon shows only when none of them is on.
 - **Also show at N stacks or fewer**, for a buff with stacks or charges.
 - In combat the game hides the buffs from add-ons: there the time of your cast is used, and everything is checked again the moment the fight ends. Weapon imbues are read even in combat.
 
