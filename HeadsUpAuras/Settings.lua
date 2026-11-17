@@ -504,6 +504,23 @@ local infoButton = UI.Button(header, "Important info", 108)
 infoButton:SetPoint("RIGHT", feedbackButton, "LEFT", -8, 0)
 UI.Tip(infoButton, Tip("Important info", "Why some things work differently in combat, and what HeadsUp Auras does about it."))
 
+-- "Minimap button": ticked = the button on the edge of the minimap is shown (left of Important info).
+-- It starts hidden, because HeadsUp Auras is in the add-on menu of the minimap anyway.
+local minimapCheck = UI.Check(header, 122, "Minimap button")
+minimapCheck:SetPoint("RIGHT", infoButton, "LEFT", -14, 0)
+function HeadsUpAuras_SyncMinimapCheck()
+    minimapCheck:SetValue(HeadsUpAuras_IsMinimapButtonShown and HeadsUpAuras_IsMinimapButtonShown())
+end
+minimapCheck:SetScript("OnShow", HeadsUpAuras_SyncMinimapCheck)
+minimapCheck:SetScript("OnClick", function(self)
+    if HeadsUpAuras_SetMinimapButtonShown then HeadsUpAuras_SetMinimapButtonShown(not self.checked) end
+    HeadsUpAuras_SyncMinimapCheck()
+end)
+UI.Tip(minimapCheck, Tip("Show minimap button", "Tick it to have the HeadsUp Auras button on the edge of the minimap.",
+    "HeadsUp Auras is always in the add-on menu of the minimap, so the button starts hidden. /hua minimap does the same."))
+-- the class and spec text stops before the tick box (a long name ends with ...)
+whoText:SetPoint("RIGHT", minimapCheck, "LEFT", -10, 0)
+
 local infoPanel = UI.Box(frame, C.window, C.accent)
 infoPanel:SetSize(470, 236)
 infoPanel:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", -12, -6)

@@ -1,3 +1,7 @@
+## HeadsUp Auras 1.5.1
+
+- The **minimap button** now starts hidden: HeadsUp Auras is always in the game's add-on menu next to the minimap. Tick **Minimap button** at the top of the window (or type `/hua minimap`) to show it again.
+
 ## HeadsUp Auras 1.5
 
 ### New: trackers that follow the real buff or weapon imbue

@@ -38,7 +38,7 @@ The add-on was called **HeadsUp** until version 1.1 beta. The name was too close
 
 ## Use
 
-- Type `/hua` to open the window, or click the **HeadsUp Auras button on the minimap** (drag it to move it; `/hua minimap` hides or shows it). It is also in the add-on menu of the minimap.
+- Type `/hua` to open the window, or click **HeadsUp Auras** in the add-on menu of the minimap. Its own minimap button starts hidden: tick **Minimap button** at the top of the window (or `/hua minimap`) to show it, then drag it to move it.
 - Step 1 **Aura**: ability, name, icon, size, position, look.
   Step 2 **Status**: health, enemy, resources.
   Step 3 **Ability**: availability, cooldown, charges, empowered.

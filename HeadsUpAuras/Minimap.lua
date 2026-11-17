@@ -1,7 +1,8 @@
 -- HeadsUp Auras: a button on the minimap that opens and closes the window, and the same action from the
 -- add-on menu of the minimap (the list of add-ons under the minimap button).
 --   click: open / close the window       drag: move the button around the minimap
---   /hua minimap: hide or show the button
+--   /hua minimap: hide or show the button (the tick box "Minimap button" in the window does the same)
+-- The button starts hidden: HeadsUp Auras is in the add-on menu of the minimap anyway.
 
 local ICON = "Interface\\AddOns\\HeadsUpAuras\\Media\\icon.tga"
 local DEFAULT_ANGLE = 200   -- degrees: lower left of the minimap
@@ -11,6 +12,15 @@ local button
 local function Settings()
     HeadsUpAurasDB = HeadsUpAurasDB or {}
     return HeadsUpAurasDB
+end
+
+-- once (also for players who had the button shown): the button starts hidden; after that the player decides
+local function ApplyMenuDefault()
+    local s = Settings()
+    if not s.minimapMenuDefault then
+        s.minimapMenuDefault = true
+        s.minimapHidden = true
+    end
 end
 
 local function Angle()
@@ -88,6 +98,7 @@ local function Create()
 end
 
 local function Refresh()
+    ApplyMenuDefault()
     if Settings().minimapHidden then
         if button then button:Hide() end
         return
@@ -99,7 +110,20 @@ end
 
 -- /hua minimap
 function HeadsUpAuras_ToggleMinimapButton()
+    ApplyMenuDefault()
     Settings().minimapHidden = not Settings().minimapHidden or nil
+    Refresh()
+    if HeadsUpAuras_SyncMinimapCheck then HeadsUpAuras_SyncMinimapCheck() end
+end
+
+-- the tick box "Minimap button" in the window
+function HeadsUpAuras_IsMinimapButtonShown()
+    ApplyMenuDefault()
+    return not Settings().minimapHidden
+end
+function HeadsUpAuras_SetMinimapButtonShown(shown)
+    ApplyMenuDefault()
+    Settings().minimapHidden = (not shown) or nil
     Refresh()
 end
 
