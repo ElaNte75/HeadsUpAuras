@@ -133,14 +133,28 @@ local function Tip(title, text, more)
 end
 
 -- Has the addon seen this aura's ability light up (for the current class + spec)?
+-- How many times it was seen (nil = never). Forever: any rank of the ability counts (ForeverRanks.lua).
+local function TimesLearned(spellID)
+    if not spellID then return nil end
+    local learned = HeadsUpAuras_GetLearned()
+    if learned[spellID] then return learned[spellID] end
+    if HeadsUpAuras_SameAbility then
+        for id, n in pairs(learned) do
+            if HeadsUpAuras_SameAbility(id, spellID) then return n end
+        end
+    end
+    return nil
+end
 local function AbilityLearned(spellID)
-    return spellID ~= nil and HeadsUpAuras_GetLearned()[spellID] ~= nil
+    return TimesLearned(spellID) ~= nil
 end
 
 -- The buffs that can make an ability light up (KnownGlows.lua: made from the game's own data by
 -- tools/make_glows.py). nil when the ability is not in the list. The addon cannot see buffs in combat,
 -- so it cannot tell which of them lit the ability: the names are information.
+-- (Forever, ForeverReactive.lua: that list is retail data, so it is not used there.)
 local function KnownSources(spellID)
+    if HeadsUpAuras_OwnGlowsOnly then return nil end
     local forClass = HeadsUpAurasGlows and HeadsUpAurasGlows[HeadsUpAuras_GetPlayerClass()]
     return forClass and spellID and forClass[spellID] or nil
 end
@@ -422,8 +436,18 @@ UI.Tip(closeButton, Tip("Close", "Closes the window (Esc does the same).", "An a
 -- feedback: an indicator next to the X, and a message that opens when it is clicked.
 -- Until it has been opened once it is bright and pulses; after that it stays as a small plain button.
 ------------------------------------------------------------
+-- Options: a small gear button left of the X, as big as the X (the window itself is in Options.lua)
+local gearButton = UI.Button(header, "", 26)
+gearButton:SetPoint("RIGHT", closeButton, "LEFT", -6, 0)
+gearButton.icon = gearButton:CreateTexture(nil, "ARTWORK")
+gearButton.icon:SetSize(16, 16)
+gearButton.icon:SetPoint("CENTER")
+gearButton.icon:SetTexture("Interface\\Icons\\INV_Misc_Gear_01")
+gearButton.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+UI.Tip(gearButton, Tip("Options", "Colour theme, the windows in combat, the minimap button."))
+
 local feedbackButton = UI.Button(header, "Send feedback", 116, true)
-feedbackButton:SetPoint("RIGHT", closeButton, "LEFT", -10, 0)
+feedbackButton:SetPoint("RIGHT", gearButton, "LEFT", -10, 0)
 UI.Tip(feedbackButton, Tip("Feedback", "Tell us what went wrong or what you need. It helps a lot."))
 
 local feedbackPulse = feedbackButton:CreateAnimationGroup()
@@ -504,22 +528,8 @@ local infoButton = UI.Button(header, "Important info", 108)
 infoButton:SetPoint("RIGHT", feedbackButton, "LEFT", -8, 0)
 UI.Tip(infoButton, Tip("Important info", "Why some things work differently in combat, and what HeadsUp Auras does about it."))
 
--- "Minimap button": ticked = the button on the edge of the minimap is shown (left of Important info).
--- It starts hidden, because HeadsUp Auras is in the add-on menu of the minimap anyway.
-local minimapCheck = UI.Check(header, 122, "Minimap button")
-minimapCheck:SetPoint("RIGHT", infoButton, "LEFT", -14, 0)
-function HeadsUpAuras_SyncMinimapCheck()
-    minimapCheck:SetValue(HeadsUpAuras_IsMinimapButtonShown and HeadsUpAuras_IsMinimapButtonShown())
-end
-minimapCheck:SetScript("OnShow", HeadsUpAuras_SyncMinimapCheck)
-minimapCheck:SetScript("OnClick", function(self)
-    if HeadsUpAuras_SetMinimapButtonShown then HeadsUpAuras_SetMinimapButtonShown(not self.checked) end
-    HeadsUpAuras_SyncMinimapCheck()
-end)
-UI.Tip(minimapCheck, Tip("Show minimap button", "Tick it to have the HeadsUp Auras button on the edge of the minimap.",
-    "HeadsUp Auras is always in the add-on menu of the minimap, so the button starts hidden. /hua minimap does the same."))
--- the class and spec text stops before the tick box (a long name ends with ...)
-whoText:SetPoint("RIGHT", minimapCheck, "LEFT", -10, 0)
+-- the class and spec text stops before the buttons (a long name ends with ...)
+whoText:SetPoint("RIGHT", infoButton, "LEFT", -12, 0)
 
 local infoPanel = UI.Box(frame, C.window, C.accent)
 infoPanel:SetSize(470, 236)
@@ -574,6 +584,12 @@ end)
 feedbackButton:HookScript("OnClick", function()
     if feedbackPanel:IsShown() then infoPanel:Hide() end
 end)
+
+-- for Options.lua: the window, its header, the gear button and the other small panels of the header
+UI.settings = {
+    frame = frame, header = header, gear = gearButton,
+    panels = { feedbackPanel, infoPanel }, panelButtons = { feedbackButton, infoButton },
+}
 
 -- left: the saved auras
 local listPanel = CreateFrame("Frame", nil, frame)
@@ -2132,6 +2148,8 @@ local function BuildAbilityPage(page)
     local empowered = page:Card("Empowered")
     -- needs an ability that the addon has seen light up (or one that already uses the row)
     local function empoweredUsable(d)
+        -- (Forever: only an ability seen lighting up there; one that never did cannot keep the row, see ForeverReactive.lua)
+        if HeadsUpAuras_GlowNeverSeen then return ForAbility(d) and not HeadsUpAuras_GlowNeverSeen(d) and true or false end
         return ForAbility(d)
             and (KnownSources(d.spellID) ~= nil or AbilityLearned(d.spellID) or d.buffEnabled) and true or false
     end
@@ -2147,7 +2165,7 @@ local function BuildAbilityPage(page)
         key = "buffEnabled",
         usable = empoweredUsable,
         tip = function(tt, d)
-            local seen = d and d.spellID and HeadsUpAuras_GetLearned()[d.spellID]
+            local seen = d and TimesLearned(d.spellID)
             tt:AddLine("Empowered ability: active / not active", 1, 0.82, 0)
             tt:AddLine("Some buffs (like Dark Succor) empower an ability and make it glow.", 1, 1, 1, true)
             tt:AddLine("The aura looks at that glow on its own ability (works in combat).", 1, 1, 1, true)
@@ -2161,6 +2179,10 @@ local function BuildAbilityPage(page)
                 tt:AddLine("This ability has lit up " .. seen .. " time(s) while you played: ready to use.", 0.4, 1, 0.4, true)
             else
                 tt:AddLine("This ability is not known to light up, and has not been seen lighting up. Play until it is empowered once; then this row becomes available.", 1, 0.5, 0.5, true)
+                if HeadsUpAuras_OwnGlowsOnly then   -- (Forever: reactive abilities never glow, see ForeverReactive.lua)
+                    tt:AddLine(" ")
+                    tt:AddLine("Abilities like Overpower or Execute that work only after a dodge or at low health: use Available.", 0.4, 1, 0.4, true)
+                end
             end
         end,
         controls = { Choice("buffState", BUFF_LIST, "active") },
@@ -2224,7 +2246,8 @@ local function BuildAbilityPage(page)
         if d.enemyEnabled and not ig("enemy") then names[#names + 1] = "enemy health" end
         if d.powerEnabled and not ig("power") then names[#names + 1] = "the main resource" end
         local _, hasCooldown = Facts(d)
-        if d.availEnabled and hasCooldown and not ig("avail") then names[#names + 1] = "available (this ability has a cooldown)" end
+        -- (Forever, ForeverReactive.lua: "available" can be read in combat there)
+        if d.availEnabled and hasCooldown and not ig("avail") and not HeadsUpAuras_ReadableAvailable then names[#names + 1] = "available (this ability has a cooldown)" end
         if d.cdEnabled and not ig("cooldown") then names[#names + 1] = "cooldown" end
         if d.chargesEnabled and not ig("charges") then names[#names + 1] = "charges" end
         if d.otherAuras and d.otherAuras[1] and not ig("others") then names[#names + 1] = "the other auras it is combined with" end
@@ -2232,27 +2255,45 @@ local function BuildAbilityPage(page)
     end
     local function overrides(d) return HeadsUpAuras_IgnoreActive(d) ~= nil end
     local function soundUsable(d)
-        if not (ForAbility(d) and d.buffEnabled and d.buffState ~= "gone") then return false end
+        -- (Forever: its own card, a sound whenever the icon appears, whatever made it appear, as long as the
+        -- addon can know it in combat. On retail it is an option of Empowered.)
+        local own = HeadsUpAuras_ReadableAvailable ~= nil
+        if not (ForAbility(d) and (own or (d.buffEnabled and d.buffState ~= "gone"))) then return false end
         return #hiddenConditions(d) == 0 and true or false
     end
     local soundList = {}
     for _, item in ipairs(HeadsUpAurasSounds) do soundList[#soundList + 1] = { value = item.key, text = item.text } end
 
-    empowered:Condition({
+    -- Forever: the sound has its own card (it plays whenever the icon appears, not only when empowered)
+    -- (decided while the page is built, when ForeverReactive.lua is not loaded yet: so the game is asked directly)
+    local build = select(4, GetBuildInfo())
+    local ownCard = ((WOW_PROJECT_CAMELOT and WOW_PROJECT_ID == WOW_PROJECT_CAMELOT) or (build and build >= 16000 and build < 20000)) and true or false
+    local soundCard = ownCard and page:Card("Sound") or empowered
+    soundCard:Condition({
         label = "Play a sound when it shows",
         key = "soundEnabled",
-        indent = true,
+        indent = not ownCard,
         usable = soundUsable,
         tip = function(tt, d)
             tt:AddLine("Play a sound when it shows", 1, 0.82, 0)
-            tt:AddLine("A short sound the moment the icon appears because the ability is empowered. Choose the sound in the list: it plays once so you can hear it.", 1, 1, 1, true)
-            tt:AddLine(" ")
-            tt:AddLine("With conditions ticked in \"Ignore while it lights up\" it sounds when the ability lights up and the other conditions hold. Otherwise it works only if the other conditions can be read in combat (the second resource, the enemy alive, \"available\" for an ability without a cooldown).", 0.7, 0.7, 0.7, true)
-            if d and d.buffEnabled and d.buffState ~= "gone" then
+            if ownCard then
+                tt:AddLine("A short sound the moment the icon appears, whatever made it appear (e.g. Overpower after a dodge). It plays once, not again while the icon stays. Choose the sound in the list: it plays once so you can hear it.", 1, 1, 1, true)
+                tt:AddLine(" ")
+                tt:AddLine("It works only if the addon can know in combat when the icon shows: not with your health, enemy health, the main resource, cooldown, charges or other auras.", 0.7, 0.7, 0.7, true)
+            else
+                tt:AddLine("A short sound the moment the icon appears because the ability is empowered. Choose the sound in the list: it plays once so you can hear it.", 1, 1, 1, true)
+                tt:AddLine(" ")
+                tt:AddLine("With conditions ticked in \"Ignore while it lights up\" it sounds when the ability lights up and the other conditions hold. Otherwise it works only if the other conditions can be read in combat (the second resource, the enemy alive, \"available\" for an ability without a cooldown).", 0.7, 0.7, 0.7, true)
+            end
+            if d and (ownCard or (d.buffEnabled and d.buffState ~= "gone")) then
                 local names = hiddenConditions(d, overrides(d))
                 if #names > 0 then
                     tt:AddLine(" ")
-                    tt:AddLine("Not available now: the game hides " .. table.concat(names, ", ") .. " in combat. Remove them, or tick them in \"Ignore while it lights up\".", 1, 0.5, 0.5, true)
+                    if ownCard and not d.buffEnabled then
+                        tt:AddLine("Not available now: the game hides " .. table.concat(names, ", ") .. " in combat. Untick them to use the sound.", 1, 0.5, 0.5, true)
+                    else
+                        tt:AddLine("Not available now: the game hides " .. table.concat(names, ", ") .. " in combat. Remove them, or tick them in \"Ignore while it lights up\".", 1, 0.5, 0.5, true)
+                    end
                 end
             end
         end,
@@ -2263,7 +2304,7 @@ local function BuildAbilityPage(page)
             end,
         }) },
     })
-    empowered:Field({
+    soundCard:Field({
         label = "Sound volume",
         usable = function(d) return soundUsable(d) and d.soundEnabled end,
         tip = Tip("Sound volume", "Soft, normal or loud. Our own sounds have a file for each level. The sounds of the game (Game: ...) have no volume, so a higher level plays them two or three times at once.", "The overall volume still follows the Master volume of the game."),
@@ -2688,7 +2729,7 @@ for _, step in ipairs(STEPS) do
     tab.bar:SetPoint("BOTTOMLEFT", 0, 0)
     tab.bar:SetPoint("BOTTOMRIGHT", 0, 0)
     tab.bar:SetHeight(2)
-    tab.bar:SetColorTexture(unpack(C.accent))
+    UI.AccentTexture(tab.bar)
     function tab:Paint()
         local selected = visible[currentStep] == step
         self.bar:SetShown(selected)
@@ -3195,6 +3236,7 @@ posWindow:RegisterForDrag("LeftButton")
 posWindow:SetScript("OnDragStart", posWindow.StartMoving)
 posWindow:SetScript("OnDragStop", posWindow.StopMovingOrSizing)
 posWindow:Hide()
+UI.settings.posWindow = posWindow   -- (Options.lua: hidden in combat too)
 
 local posTitle = UI.Text(posWindow, 14, C.accent)
 posTitle:SetPoint("TOPLEFT", 16, -14)
@@ -3262,7 +3304,10 @@ posWindow:SetScript("OnUpdate", function(self, elapsed)
     FillPosition()
 end)
 posWindow:SetScript("OnShow", function() posSince = 1 end)
-posWindow:SetScript("OnHide", function() HeadsUpAuras_GroupRestore() end)   -- closed without Save: the group goes back
+posWindow:SetScript("OnHide", function()
+    if UI.combatHidden and UI.combatReturn then return end   -- (hidden for a fight, Options.lua: it comes back as it was)
+    HeadsUpAuras_GroupRestore()   -- closed without Save: the group goes back
+end)
 tinsert(UISpecialFrames, "HeadsUpAurasGroupPosition")
 
 function OpenGroupPosition(id, name)
@@ -3351,7 +3396,7 @@ local function GetRow(n)
     row:SetPoint("RIGHT", listPanel, "RIGHT", -8, 0)
     row.bg = row:CreateTexture(nil, "BACKGROUND")
     row.bg:SetAllPoints()
-    row.bg:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], 0.18)   -- the aura being edited
+    UI.AccentTexture(row.bg, 0.18)   -- the aura being edited
     row.hl = row:CreateTexture(nil, "BORDER")
     row.hl:SetAllPoints()
     row.hl:SetColorTexture(1, 1, 1, 0.07)
@@ -3388,7 +3433,7 @@ local function GetRow(n)
     row.checkFill = row.check:CreateTexture(nil, "OVERLAY")
     row.checkFill:SetSize(6, 6)
     row.checkFill:SetPoint("CENTER")
-    row.checkFill:SetColorTexture(unpack(C.accent))
+    UI.AccentTexture(row.checkFill)
     row.text = UI.Text(row, 12, C.text)
     -- green square = selected: its placeholder is on screen
     row.dot = row:CreateTexture(nil, "OVERLAY")
@@ -3776,6 +3821,12 @@ local function ShowHeaderRow(row, count)
     row:Show()
 end
 
+-- a new colour theme (Options.lua): the tabs and the list paint themselves again
+UI.themeHooks[#UI.themeHooks + 1] = function()
+    for _, step in ipairs(STEPS) do if step.tab then step.tab:Paint() end end
+    if RefreshList then RefreshList() end
+end
+
 function RefreshList()
     -- a selected group that has gone away (it fell below two auras) is not selected any more
     local movingId = HeadsUpAuras_GetMovingGroup()
@@ -3895,6 +3946,8 @@ end
 -- opening, closing, events
 ------------------------------------------------------------
 frame:SetScript("OnShow", function()
+    -- back after combat (Options.lua: "Reopen them after combat"): the work is where it was left
+    if UI.combatHidden then return end
     UpdateFeedbackButton()
     HeadsUpAuras_EndEdit()   -- opens with nothing open: New or Edit starts the work
     SetStep(1)
@@ -3902,6 +3955,12 @@ frame:SetScript("OnShow", function()
     RefreshList()
 end)
 frame:SetScript("OnHide", function()
+    -- hidden for a fight (Options.lua) and coming back after it: nothing is discarded
+    if UI.combatHidden and UI.combatReturn then
+        UI.ClearFocus()
+        UI.ClosePopup()
+        return
+    end
     feedbackPanel:Hide()
     UI.ClearFocus()
     UI.ClosePopup()

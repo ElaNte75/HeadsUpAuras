@@ -58,6 +58,16 @@ UI.Clamp = clamp
 
 local function rgba(c) return c[1], c[2], c[3], c[4] or 1 end
 
+-- Colour theme (Options.lua): what is drawn in the accent colour is remembered here, so that a new theme
+-- (C.accent changed in place) can repaint it at once. Paint() of every clickable piece reads C each time.
+UI.themed, UI.paintables, UI.themeHooks = {}, {}, {}
+local function Themed(kind, obj, alpha) UI.themed[#UI.themed + 1] = { kind, obj, alpha } end
+-- a texture in the accent colour (alpha: its own transparency, default 1)
+function UI.AccentTexture(tex, alpha)
+    tex:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], alpha or 1)
+    Themed("tex", tex, alpha)
+end
+
 local function colX(col) return L.PAD + (col - 1) * (L.COL_W + L.GAP) end
 local function spanW(span) return span * L.COL_W + (span - 1) * L.GAP end
 
@@ -73,6 +83,8 @@ function UI.Box(parent, bg, border, frameType, name)
     })
     f:SetBackdropColor(rgba(bg))
     f:SetBackdropBorderColor(rgba(border or C.border))
+    if bg == C.accent then Themed("bg", f) end
+    if border == C.accent then Themed("border", f) end
     return f
 end
 
@@ -81,6 +93,7 @@ function UI.Text(parent, size, color, justify)
     fs:SetFont(FONT, size or 12, "")
     local c = color or C.text
     fs:SetTextColor(rgba(c))
+    if c == C.accent then Themed("text", fs) end
     fs:SetJustifyH(justify or "LEFT")
     fs:SetWordWrap(false)
     return fs
@@ -118,6 +131,7 @@ end
 -- hover handling and a Paint() for anything that is clicked
 local function Interactive(b, paint)
     b.Paint = paint
+    UI.paintables[#UI.paintables + 1] = b
     b:HookScript("OnEnter", function(self) self.hover = true; self:Paint() end)
     b:HookScript("OnLeave", function(self) self.hover = false; self:Paint() end)
     function b:SetOn(on)
@@ -354,7 +368,7 @@ local function buildPopup()
         r.fill = r.mark:CreateTexture(nil, "OVERLAY")
         r.fill:SetSize(6, 6)
         r.fill:SetPoint("CENTER")
-        r.fill:SetColorTexture(rgba(C.accent))
+        UI.AccentTexture(r.fill)
         r.icon = r:CreateTexture(nil, "ARTWORK")
         r.icon:SetSize(16, 16)
         r.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)

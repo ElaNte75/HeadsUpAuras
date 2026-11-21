@@ -16,6 +16,8 @@ KnownDurations.lua
 UI.lua
 Settings.lua
 Minimap.lua
+Options.lua
 ImbueWatch.lua
 ForeverRanks.lua
+ForeverReactive.lua
 BuffWatch.lua

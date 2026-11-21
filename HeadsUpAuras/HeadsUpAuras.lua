@@ -1618,12 +1618,18 @@ local function SoundConditionsMet(cfg, ind)
     -- "Ignore while it lights up": while it is lit the ticked conditions do not count (the others do)
     local free = overrides and lit
     local function ig(key) return free and ignoring[key] end
+    -- Forever (ForeverReactive.lua): "available" can be read in combat as a plain yes/no, cooldown included
+    -- (nil = not used / not readable; only a real "no" stops the sound)
+    local availRead
+    if cfg.availEnabled and not ig("avail") and HeadsUpAuras_ReadableAvailable then availRead = HeadsUpAuras_ReadableAvailable(cfg.spellID) end
+    if availRead == false then return false end
     -- a condition that the game hides in combat (and that is not ignored) means the addon cannot know when the aura shows
     local hidden = (cfg.healthEnabled and not ig("health")) or (cfg.enemyEnabled and not ig("enemy"))
         or (cfg.powerEnabled and not ig("power")) or (cfg.cdEnabled and not ig("cooldown"))
         or (cfg.chargesEnabled and not ig("charges"))
-        or (cfg.availEnabled and ind.hasCooldown ~= false and not ig("avail"))
+        or (cfg.availEnabled and ind.hasCooldown ~= false and not ig("avail") and availRead == nil)
         or ((cfg.otherAuras and cfg.otherAuras[1]) and not ig("others"))
+    if cfg.availEnabled and not ig("avail") and HeadsUpAuras_ReactiveBlocked and HeadsUpAuras_ReactiveBlocked(cfg.spellID) then return false end   -- (Forever)
     if hidden then return nil end
     if not ShowRulesAllow(cfg, ind) then return false end
     if cfg.suppressEnabled then
@@ -1731,6 +1737,7 @@ local function ReadablePartMet(c, x)
         local ok, usable = pcall(C_Spell.IsSpellUsable, c.spellID)
         if not ok or issecretvalue(usable) or not usable then return false end
     end
+    if c.availEnabled and HeadsUpAuras_ReactiveBlocked and HeadsUpAuras_ReactiveBlocked(c.spellID) then return false end   -- (Forever)
     return true
 end
 
@@ -1903,7 +1910,13 @@ local function UpdateVisual(ind)
         else
             A:SetAlpha(1)
         end
-        if cfg.availEnabled and ind.powerType and not ig("avail") then
+        -- Forever (ForeverReactive.lua): "available" is a plain yes/no there (resource, cooldown, Overpower after a dodge...):
+        -- it decides alone (frame M below), without the hidden resource / cooldown curves. nil = not readable.
+        local availRead
+        if cfg.availEnabled and not ig("avail") and HeadsUpAuras_ReadableAvailable then availRead = HeadsUpAuras_ReadableAvailable(cfg.spellID) end
+        if availRead ~= nil then
+            C:SetAlpha(1)
+        elseif cfg.availEnabled and ind.powerType and not ig("avail") then
             C:SetAlpha(UnitPowerPercent("player", ind.powerType, false, ind.powerCurve))
         else
             C:SetAlpha(1)
@@ -1963,7 +1976,12 @@ local function UpdateVisual(ind)
         J:SetAlpha(ReadableConditionsMet(cfg, lingering, ig("target")) and 1 or 0)
         -- "the ability is available": the cost part is the C frame above; here the cooldown part
         -- (the global cooldown is ignored, a charge left counts as available)
-        if cfg.availEnabled and ind.cdDuration and not ig("avail") then
+        -- (Forever, ForeverReactive.lua: also only while the game says it can be pressed, e.g. Overpower after a dodge)
+        if availRead ~= nil then
+            M:SetAlpha(availRead and 1 or 0)
+        elseif cfg.availEnabled and not ig("avail") and HeadsUpAuras_ReactiveBlocked and HeadsUpAuras_ReactiveBlocked(cfg.spellID) then
+            M:SetAlpha(0)
+        elseif cfg.availEnabled and ind.cdDuration and not ig("avail") then
             M:SetAlpha(ind.cdDuration:EvaluateRemainingDuration(ind.readyCurve))
         else
             M:SetAlpha(1)
@@ -3047,7 +3065,8 @@ end
 function HeadsUpAuras_GetLearned()
     local learned = HeadsUpAurasDB and HeadsUpAurasDB.learned
     local forClass = learned and learned[playerClass]
-    return (forClass and currentSpec and forClass[currentSpec]) or {}
+    local specKey = currentSpec or (HeadsUpAuras_OwnGlowsOnly and 0)   -- (Forever: also without a specialization)
+    return (forClass and specKey and forClass[specKey]) or {}
 end
 function HeadsUpAuras_GetPlayerClass() return playerClass end
 function HeadsUpAuras_GetResources() return GetResources() end
@@ -3760,6 +3779,7 @@ end
 function HeadsUpAuras_Save()
     if not draft or not draft.spellID then return nil end
     if draft.kind == "tracker" or draft.trackerOf then draft.suppressEnabled = true end   -- a tracker needs its timer
+    if draft.buffEnabled and HeadsUpAuras_GlowNeverSeen and HeadsUpAuras_GlowNeverSeen(draft) then draft.buffEnabled = false end   -- (Forever: it never lights up)
     draft.name = UniqueName(draft.name or SpellName(draft.spellID) or "Aura", editIndex)
     draft.uid = draft.uid or NewUid()
     if editIndex then
@@ -3801,13 +3821,14 @@ local function OnEvent(_, event, arg1, arg2, arg3)
     if event == "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW" then
         -- Self-learning: remember which abilities light up (are "empowered"), for this class
         -- and specialization. The "Buff" condition offers exactly these.
-        if HeadsUpAurasDB and currentSpec and type(arg1) == "number" and not issecretvalue(arg1) then
+        local specKey = currentSpec or (HeadsUpAuras_OwnGlowsOnly and 0)   -- (Forever: also without a specialization, low level)
+        if HeadsUpAurasDB and specKey and type(arg1) == "number" and not issecretvalue(arg1) then
             local learned = HeadsUpAurasDB.learned or {}
             HeadsUpAurasDB.learned = learned
             local forClass = learned[playerClass] or {}
             learned[playerClass] = forClass
-            local forSpec = forClass[currentSpec] or {}
-            forClass[currentSpec] = forSpec
+            local forSpec = forClass[specKey] or {}
+            forClass[specKey] = forSpec
             forSpec[arg1] = (forSpec[arg1] or 0) + 1
         end
     end
@@ -3982,6 +4003,7 @@ local function OnEvent(_, event, arg1, arg2, arg3)
             a.links = nil   -- (an older way to link auras: no longer used)
             if a.kind == "buff" or a.kind == "debuff" then a.kind = "tracker" end
             if a.kind == "tracker" or a.trackerOf then a.suppressEnabled = true end   -- a tracker needs its timer
+            if a.buffEnabled and HeadsUpAuras_GlowNeverSeen and HeadsUpAuras_GlowNeverSeen(a) then a.buffEnabled = false end   -- (Forever: it never lights up, ForeverReactive.lua)
             -- "None" used to be a choice of the bar's time and icon: now a tick box each
             if a.barTime == "none" then a.barTimeOn, a.barTime = false, "right" end
             if a.barIcon == "none" then a.barIconOn, a.barIcon = false, "left" end   -- one kind: the side comes from the ability
