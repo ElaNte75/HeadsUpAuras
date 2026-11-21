@@ -12,7 +12,7 @@ You build your own icons ("auras") with a simple step-by-step window: choose an 
   - your health and the enemy's health (below, equal or below, equal, equal or above, above, with a percent)
   - the enemy is alive
   - your resources, matched to your class: the main one (Runic Power, Mana, Rage...) and the second one (Runes, Holy Power, Combo Points, Soul Shards, Chi...)
-  - the ability is available (not on cooldown, and you have enough resource)
+  - the ability is available (not on cooldown, and you have enough resource; in WoW Forever also abilities that light up after a dodge or at low health, such as Overpower or Execute)
   - cooldown, charges, and a hide time after you cast it
   - the ability is **empowered** (lit up by a proc such as Dark Succor or Killing Machine), with an option to show the icon whenever it is empowered, whatever the other conditions say
 - **Where and for whom**: only in combat, out of combat, mounted, in a vehicle, and for chosen specializations. Optionally keep the icon for a few seconds after combat.
@@ -38,7 +38,7 @@ The add-on was called **HeadsUp** until version 1.1 beta. The name was too close
 
 ## Use
 
-- Type `/hua` to open the window, or click **HeadsUp Auras** in the add-on menu of the minimap. Its own minimap button starts hidden: tick **Minimap button** at the top of the window (or `/hua minimap`) to show it, then drag it to move it.
+- Type `/hua` to open the window, or click **HeadsUp Auras** in the add-on menu of the minimap. Its own minimap button starts hidden: tick **Show minimap button** in **Options** (the gear button next to the X), or type `/hua minimap`, to show it, then drag it to move it. **Options** also has a colour theme and can hide the windows in combat.
 - Step 1 **Aura**: ability, name, icon, size, position, look.
   Step 2 **Status**: health, enemy, resources.
   Step 3 **Ability**: availability, cooldown, charges, empowered.

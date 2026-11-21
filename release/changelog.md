@@ -1,3 +1,18 @@
+## HeadsUp Auras 1.6
+
+### New: Options window
+
+- A small **gear** button next to the X opens the new **Options** window.
+- **Colour theme**: Orange, Blue or Green for the HeadsUp Auras windows. It changes at once.
+- **Hide the windows in combat**, and **Reopen them after combat** with your work as you left it.
+- **Show minimap button** has moved here from the top of the window, so the name of your class and specialization has room again.
+
+### WoW Forever
+
+- **Abilities that light up after a dodge, a parry or at low health** (Overpower, Revenge, Execute, Victory Rush...): tick **Available** and the icon shows exactly while the game lets you press the ability, also in combat.
+- **Empowered** is offered only for abilities that really light up in WoW Forever. An ability that never does cannot keep it, so an icon can no longer wait for a glow that never comes.
+- **Sound** has its own card: a short sound the moment the icon appears, whatever made it appear.
+
 ## HeadsUp Auras 1.5.1
 
 - The **minimap button** now starts hidden: HeadsUp Auras is always in the game's add-on menu next to the minimap. Tick **Minimap button** at the top of the window (or type `/hua minimap`) to show it again.
